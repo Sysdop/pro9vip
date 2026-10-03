@@ -1,0 +1,224 @@
+<?php
+
+namespace App\Models\Tenant;
+
+use App\Traits\AttributePerItems;
+use Illuminate\Database\Eloquent\Builder;
+
+/**
+ * Class DispatchItem
+ *
+ * @package App\Models\Tenant
+ * @mixin ModelTenant
+ * @property \App\Models\Tenant\Dispatch $dispatch
+ * @property mixed $item
+ * property \App\Models\Tenant\Item $relation_item
+ * @method static Builder|DispatchItem joinDispatch()
+ * @method static Builder|DispatchItem joinItem()
+ * @method static Builder|DispatchItem newModelQuery()
+ * @method static Builder|DispatchItem newQuery()
+ * @method static Builder|DispatchItem query()
+ */
+class DispatchItem extends ModelTenant
+{
+    use AttributePerItems;
+    public $timestamps = false;
+    protected $with = [
+        'relation_item',
+    ];
+    protected $fillable = [
+        'dispatch_id',
+        'item_id',
+        'item',
+        'quantity',
+        'name_product_pdf',
+        'additional_data'
+    ];
+
+    protected $casts = [
+        'quantity' => 'float',
+    ];
+    public function getAdditionalDataAttribute($value)
+    {
+        return (is_null($value))?null:(object) json_decode($value);
+    }
+
+    public function setAdditionalDataAttribute($value)
+    {
+        $this->attributes['additional_data'] = (is_null($value))?null:json_encode($value);
+    }
+
+    /**
+     * @param int $decimal
+     *
+     * @return string
+     */
+    public function getQtyFormated($decimal = 2){
+        return number_format($this->quantity,$decimal);
+    }
+
+    public function getItemAttribute($value)
+    {
+        return (is_null($value))?null:(object) json_decode($value);
+    }
+
+    public function setItemAttribute($value)
+    {
+        $this->attributes['item'] = (is_null($value))?null:json_encode($value);
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function relation_item()
+    {
+        return $this->belongsTo(Item::class, 'item_id');
+    }
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo
+     */
+    public function dispatch()
+    {
+        return $this->belongsTo(Dispatch::class);
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeJoinDispatch(Builder $query){
+        $query->join('dispatches','dispatches.id','=','dispatch_items.dispatch_id');
+
+        return $query;
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeJoinItem(Builder $query){
+        $query->join('items','items.id','=','dispatch_items.item_id');
+
+        return $query;
+    }
+
+    /**
+     * Retorna un standar de nomenclatura para el modelo
+     *
+     * @param \App\Models\Tenant\Configuration|null $configuration
+     *
+     * @return array
+     */
+    public function getCollectionData(Configuration $configuration = null) {
+        $dispatches = Dispatch::find($this->dispatch_id);
+        $item = Item::find($this->item_id);
+        if (null === $configuration) {
+            $configuration = Configuration::first();
+        }
+
+        $this->quantity = number_format($this->quantity,2);
+        $data = $this->toArray();
+        $data['item'] = [];
+        $data['dispatches'] = [];
+        if (!empty($dispatches)) {
+            $data['dispatches'] = $dispatches->getCollectionData();
+        }
+        if (!empty($item)) {
+            $data['item'] = $item->getCollectionData($configuration);
+        }
+
+        return $data;
+    }
+
+    /**
+     * Datos livianos para reportes consolidados (PDF/Excel).
+     * Evita getCollectionData() (N+1 + rutas web) que tumba jobs en cola.
+     */
+    public function getConsolidatedReportRow(): array
+    {
+        $dispatch = $this->dispatch;
+        $itemJson = $this->item;
+        $person = $dispatch ? $dispatch->person : null;
+        $customerJson = $dispatch ? $dispatch->customer : null;
+
+        $customerName = '';
+        $customerNumber = '';
+        if ($person) {
+            $customerName = $person->name ?? '';
+            $docType = optional($person->identity_document_type)->description;
+            $customerNumber = trim(($docType ? $docType.' ' : '').($person->number ?? ''));
+        } elseif ($customerJson) {
+            $customerName = $customerJson->name ?? '';
+            $docType = is_object($customerJson->identity_document_type ?? null)
+                ? ($customerJson->identity_document_type->description ?? '')
+                : '';
+            $customerNumber = trim(($docType ? $docType.' ' : '').($customerJson->number ?? ''));
+        }
+
+        $dispatcher = $dispatch ? $dispatch->dispatcher : null;
+        if (is_array($dispatcher)) {
+            $dispatcher = (object) $dispatcher;
+        }
+        $dispatcherNumber = $dispatcher->number ?? '';
+        $dispatcherName = $dispatcher->name ?? '';
+        $dispatcherDocType = '';
+        if ($dispatcher && !empty($dispatcher->identity_document_type_id)) {
+            static $identityTypes = null;
+            if ($identityTypes === null) {
+                $identityTypes = \App\Models\Tenant\Catalogs\IdentityDocumentType::query()
+                    ->pluck('description', 'id');
+            }
+            $dispatcherDocType = (string) ($identityTypes->get($dispatcher->identity_document_type_id) ?? '');
+        }
+
+        $orderNote = '';
+        if ($dispatch && $dispatch->order_note) {
+            $orderNote = $dispatch->order_note->number_full
+                ?? (($dispatch->order_note->prefix ?? 'OP').'-'.$dispatch->order_note->id);
+        }
+
+        $transferReason = '';
+        if ($dispatch && $dispatch->transfer_reason_type) {
+            $transferReason = $dispatch->transfer_reason_type->description ?? '';
+        }
+
+        $dateOfIssue = '';
+        $dateOfShipping = '';
+        if ($dispatch && $dispatch->date_of_issue) {
+            $dateOfIssue = $dispatch->date_of_issue instanceof \DateTimeInterface
+                ? $dispatch->date_of_issue->format('Y-m-d')
+                : \Illuminate\Support\Carbon::parse($dispatch->date_of_issue)->format('Y-m-d');
+        }
+        if ($dispatch && $dispatch->date_of_shipping) {
+            $dateOfShipping = $dispatch->date_of_shipping instanceof \DateTimeInterface
+                ? $dispatch->date_of_shipping->format('Y-m-d')
+                : \Illuminate\Support\Carbon::parse($dispatch->date_of_shipping)->format('Y-m-d');
+        }
+
+        return [
+            'quantity' => (float) $this->quantity,
+            'quantity_formatted' => $this->getQtyFormated(),
+            'item_description' => optional($itemJson)->description
+                ?? optional($this->relation_item)->description
+                ?? '',
+            'date_of_issue' => $dateOfIssue,
+            'date_of_shipping' => $dateOfShipping,
+            'customer_name' => $customerName,
+            'customer_number' => $customerNumber,
+            'user_name' => optional(optional($dispatch)->user)->name ?? '',
+            'number' => optional($dispatch)->number_full ?? '',
+            'state_type_description' => optional(optional($dispatch)->state_type)->description ?? '',
+            'transfer_reason' => $transferReason,
+            'transfer_description' => optional($dispatch)->transfer_reason_description ?? '',
+            'type_doc' => $dispatcherDocType,
+            'num_doc' => $dispatcherNumber,
+            'name_dispatcher' => $dispatcherName,
+            'order_note' => $orderNote,
+            'order_form_description' => $dispatch ? ($dispatch->getOrderFormDescription() ?? '') : '',
+        ];
+    }
+
+}

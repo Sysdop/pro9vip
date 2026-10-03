@@ -1,0 +1,1 @@
+import{b as e,e as t,f as a,g as s}from"./vendor.27ef54d8.js";import{p as o}from"./sidebarLayoutState.a0cdb582.js";const n={class:"page-content-inner"},l=e({setup(r){return o.value="POS",t({title:"Main POS"}),(c,i)=>(a(),s("div",n))}});export{l as default};

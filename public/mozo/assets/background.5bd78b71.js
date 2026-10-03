@@ -1,0 +1,1 @@
+const l=(e,r)=>{const n=r.value.src,a=r.value.placeholder;if(n){const o=new Image;a&&(o.onerror=()=>{o.onerror=null,e.style.backgroundImage=`url(${a})`}),o.onload=()=>{o.onload=null,e.style.backgroundImage=`url(${n})`},o.src=n}},t={getSSRProps(e,r){return{}},updated:l,mounted:l};export{t as default};

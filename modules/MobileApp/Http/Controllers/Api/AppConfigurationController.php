@@ -1,0 +1,95 @@
+<?php
+
+namespace Modules\MobileApp\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Modules\MobileApp\Http\Resources\Api\AppConfigurationResource;
+use Modules\MobileApp\Http\Requests\Api\AppConfigurationRequest;
+use Modules\MobileApp\Models\AppConfiguration;
+use App\Models\Tenant\{
+    Company,
+    Configuration
+};
+use Illuminate\Support\Facades\Cache;
+
+
+class AppConfigurationController extends Controller
+{
+
+    /**
+     *
+     * Usado en:
+     * AppConfigurationController - web
+     *
+     * @return AppConfigurationResource
+     */
+    public function record()
+    {
+        return new AppConfigurationResource(AppConfiguration::firstOrFail());
+    }
+
+
+    /**
+     *
+     * Actualizar configuracion de la app
+     *
+     * @param  AppConfigurationRequest $request
+     * @return array
+     */
+    public function store(AppConfigurationRequest $request)
+    {
+        $record = AppConfiguration::firstOrFail();
+        // $record->fill($request->all());
+        $record->show_image_item = $request->show_image_item;
+        $record->print_format_pdf = $request->print_format_pdf;
+        $record->direct_print = $request->direct_print;
+        $record->save();
+
+        return [
+            'success' => true,
+            'message' => 'Configuración actualizada',
+            'data' => $record->getRowResource(),
+        ];
+    }
+
+
+    /**
+     *
+     * Obtener parametros iniciales de configuracion
+     *
+     * @return array
+     */
+    public function getInitialSettings()
+    {
+
+        $user = auth()->user();
+
+        return [
+            'style_settings' => AppConfiguration::firstOrFail()->getRowInitialSettings(),
+            'permissions' => $user->getAppPermission(),
+            'generals' => [
+                'pos_document_types' => $user->getPosDocumentTypes(),
+                'app_logo' => Company::getAppUrlLogo(),
+                'app_logo_dark' => Company::getAppUrlLogoDark(),
+                'user_data' => $user->getGeneralDataApp()
+            ],
+            'multi_user_enabled' => config('configuration.multi_user_enabled')
+        ];
+    }
+
+    public function app_json()
+    {
+        $data = Cache::remember('app_json', now()->addHours(12), function () {
+            $record = AppConfiguration::firstOrFail();
+
+            return [
+                'primary_color' => $record->primary_color ?? '#020F3C',
+                'app_logo'      => Company::getAppUrlLogo(),
+                'app_logo_dark' => Company::getAppUrlLogoDark(),
+                'name'          => Company::first()->trade_name,
+            ];
+        });
+
+        return response()->json($data);
+    }
+}

@@ -1,0 +1,265 @@
+import './bootstrap';
+import './mobile-app-behavior';
+import Swal from 'sweetalert2';
+
+import 'bootstrap/dist/js/bootstrap.bundle.js'; // Incluye Popper
+import 'bootstrap/dist/css/bootstrap.min.css';
+
+import Vue from 'vue'
+import store from './store'
+import ElementUI from 'element-ui'
+
+import lang from 'element-ui/lib/locale/lang/es'
+import locale from 'element-ui/lib/locale'
+
+// Agrega remote-search (input con debounce) a el-input, antes de Vue.use(ElementUI)
+import './vendor/element-input-remote-search'
+// el-input-number acepta coma decimal (la cambia por punto), antes de Vue.use(ElementUI)
+import './vendor/element-input-number-decimal'
+// Atributo decimal en el-input (coma → punto, sin letras); después de remote-search
+import './vendor/element-input-decimal'
+
+import '../sass/element-ui.scss';
+import '../sass/pages/system-update.scss';
+import 'element-ui/lib/theme-chalk/index.css';
+import CheckoutIzipay from './components/checkouts/izipay.vue'
+import CheckoutCulqi from './components/checkouts/culqi.vue'
+import CheckoutMercadopago from './components/checkouts/mercadopago.vue'
+import CheckoutAdmin from './components/checkouts/CheckoutAdmin.vue'
+import CheckoutGuest from './components/checkouts/CheckoutGuest.vue'
+
+
+// components
+import SystemSupportConfiguration from './views/system/configuration/supportConfiguration.vue';
+import SystemConfigurationOpenAi from './views/system/configuration/openAiConfiguration.vue'
+import SystemGoogleMapsConfiguration from './views/system/configuration/googleMapsConfiguration.vue'
+import SystemGitRepositoryConfiguration from './views/system/configuration/gitRepositoryConfiguration.vue'
+import SystemTermsConfiguration from './views/system/configuration/termsConfiguration.vue'
+import SystemClientsIndex from './views/system/clients/index.vue';
+import SystemClientsForm from './views/system/clients/form.vue';
+import SystemUsersform from './views/system/users/form.vue';
+import SystemUsersTokenUser from './views/system/users/token-user.vue';
+import SystemCertificateIndex from './views/system/certificate/index.vue';
+import SystemCompaniesForm from './views/system/companies/form.vue';
+import SystemAccountingIndex from '@viewsModuleAccount/system/accounting/index.vue';
+import SystemMultiUsersIndex from '@viewsModuleMultiUser/system/multi-users/index.vue';
+import SystemMassiveInvoiceIndex from './views/system/massive_invoice/index.vue';
+import SystemUpdateIndex from './views/system/update/index.vue';
+import SystemBackupIndex from './views/system/backup/index.vue';
+import SystemConfigurationPaymentGateway from './views/system/configuration/payment-gateway.vue';
+import SystemConfigurationApkUrl from './views/system/configuration/apk-url.vue';
+import SystemConfigurationTokenRucDni from './views/system/configuration/token_ruc_dni.vue';
+import SystemConfigurationPhpInfo from './views/system/configuration/php_info.vue';
+import SystemConfigurationServerStatus from './views/system/configuration/server_status.vue';
+import SystemConfigurationLogin from './views/system/configuration/login.vue';
+import SystemConfigurationOtherConfiguration from './views/system/configuration/other_configuration.vue';
+import SystemAdsConfiguration from './views/system/configuration/ads_configuration.vue';
+import SystemConfigurationEmail from './views/system/configuration/emailConfiguration.vue';
+import SystemWhatsAppNotifyConfiguration from './views/system/configuration/whatsAppNotifyConfiguration.vue';
+import PublicSearchBackgroundConfiguration from './views/shared/public_search_background.vue';
+import SystemReportLoginLockout from '@viewsModuleReport/system/report_login_lockout/index.vue';
+import SystemUserNotChangePassword from '@viewsModuleReport/system/user_not_change_password/index.vue';
+import SystemPlansIndex from './views/system/plans/index.vue';
+import SystemPlansForm from './views/system/plans/form.vue';
+import SystemBusinessTurnsIndex from './views/system/business_turns/index.vue';
+import SystemWahaServersIndex from './views/system/waha_servers/index.vue';
+import SystemWhatsappProviderConfiguration from './views/system/configuration/whatsappProviderConfiguration.vue';
+import SystemConfigurationCronOrderPayments from './views/system/configuration/cronOrderPayments.vue';
+import SystemPaymentsIndex from './views/system/payments/index.vue';
+import SystemPaymentViewIndex from './views/system/payments/payment-view.vue';
+import SystemAdminResellerAdministratorsIndex from './views/system/admin_reseller/administrators/index.vue';
+import SystemMozoIndex from './views/system/mozo/index.vue';
+import MarketplaceAdmin from '@viewsModuleMarketplace/admin/MarketplaceAdmin.vue';
+
+import InputService from '../../modules/ApiPeruDev/Resources/assets/js/components/InputService.vue'// apiperu - porque cambiar el input si tiene el mismo contenido?
+import SystemGuestRegisterDisabled from  './views/system/guest-register/disabled.vue'
+import SystemGuestRegister from './views/system/guest-register/register.vue'
+import SystemGuestRegisterPlanPanel from './views/system/guest-register/plan-panel.vue'
+import XImportServiceGuest from './../../modules/ApiPeruDev/Resources/assets/js/components/InputServiceGuest.vue'
+import SystemConfigurationThemes from './views/system/configuration/themes.vue'
+import SystemsVisibleColumns from './views/system/configuration/visibleColumns.vue'
+import SystemConfigurationSections from './views/system/configuration/sections.vue'
+import SystemStorageManagement from './views/system/storage-management/index.vue'
+import SystemExtraServicesIndex from '@viewsModuleExtraServices/index.vue';
+
+locale.use(lang)
+
+// Fix for ElementUI Select readonly in IE
+ElementUI.Select.computed.readonly = function () {
+    const isIE = !this.$isServer && !Number.isNaN(Number(document.documentMode));
+    return !(this.filterable || this.multiple || !isIE) && !this.visible;
+};
+
+export default ElementUI;
+
+Vue.use(ElementUI, { size: 'small' })
+Vue.prototype.$eventHub = new Vue()
+
+// Interceptor: sesión vencida por inactividad (419)
+let sessionExpiredShown = false;
+if (Vue.prototype.$http) {
+    Vue.prototype.$http.interceptors.response.use(
+        response => response,
+        error => {
+            if (error.response && error.response.status === 419 && !sessionExpiredShown) {
+                sessionExpiredShown = true;
+                Swal.fire({
+                    title: 'Sesión cerrada por inactividad',
+                    text: 'Por seguridad tu sesión expiró. Pulsa Continuar para recargar y seguir trabajando.',
+                    icon: 'warning',
+                    confirmButtonText: 'Continuar',
+                    confirmButtonColor: '#5b21b6',
+                    allowOutsideClick: false,
+                    allowEscapeKey: false
+                }).then(() => window.location.reload());
+                return new Promise(() => {});
+            }
+            return Promise.reject(error);
+        }
+    );
+}
+
+// System components only
+Vue.component('system-support-configuration', SystemSupportConfiguration);
+
+Vue.component('system-clients-index', SystemClientsIndex);
+Vue.component('system-openai-configuration', SystemConfigurationOpenAi);
+Vue.component('system-google-maps-configuration', SystemGoogleMapsConfiguration);
+Vue.component('system-git-repository-configuration', SystemGitRepositoryConfiguration);
+Vue.component('system-terms-configuration', SystemTermsConfiguration);
+Vue.component('system-clients-form', SystemClientsForm);
+Vue.component('system-users-form', SystemUsersform);
+Vue.component('system-users-token-user', SystemUsersTokenUser);
+
+Vue.component('system-certificate-index', SystemCertificateIndex);
+Vue.component('system-companies-form', SystemCompaniesForm);
+
+Vue.component('system-accounting-index', SystemAccountingIndex);
+
+Vue.component('system-multi-users-index', SystemMultiUsersIndex);
+Vue.component('system-massive-invoice-index', SystemMassiveInvoiceIndex);
+
+// Tools & config in System
+Vue.component('system-update', SystemUpdateIndex);
+Vue.component('system-backup', SystemBackupIndex);
+Vue.component('system-configuration-payment-gateway', SystemConfigurationPaymentGateway);
+Vue.component('system-configuration-apk-url', SystemConfigurationApkUrl);
+Vue.component('system-configuration-token', SystemConfigurationTokenRucDni);
+Vue.component('system-php-configuration', SystemConfigurationPhpInfo);
+Vue.component('system-server-status', SystemConfigurationServerStatus);
+
+// Login/Access settings
+Vue.component('system-login-settings', SystemConfigurationLogin);
+Vue.component('system-login-other-configuration', SystemConfigurationOtherConfiguration);
+Vue.component('system-ads-configuration', SystemAdsConfiguration);
+Vue.component('system-email-configuration', SystemConfigurationEmail);
+Vue.component('system-whatsapp-notify-configuration', SystemWhatsAppNotifyConfiguration);
+Vue.component('system-public-search-configuration', PublicSearchBackgroundConfiguration);
+
+// Reports in system
+Vue.component('system-report-login-lockout-index', SystemReportLoginLockout);
+Vue.component('system-user-not-change-password-index', SystemUserNotChangePassword);
+
+// System plans
+Vue.component('system-plans-index', SystemPlansIndex);
+Vue.component('system-plans-form', SystemPlansForm);
+
+// Giro de negocio (system)
+Vue.component('system-business-turns-index', SystemBusinessTurnsIndex);
+
+// WAHA (proveedor de conexión WhatsApp alternativo a Evolution)
+Vue.component('system-waha-servers-index', SystemWahaServersIndex);
+Vue.component('system-whatsapp-provider-configuration', SystemWhatsappProviderConfiguration);
+
+// inputservice
+Vue.component('x-input-service', InputService);
+
+//system payments
+Vue.component('system-payments-index', SystemPaymentsIndex);
+Vue.component('system-payments-view-index', SystemPaymentViewIndex);
+Vue.component('system-cron-order-configuration', SystemConfigurationCronOrderPayments);
+Vue.component('system-admin-reseller-administrators-index', SystemAdminResellerAdministratorsIndex);
+Vue.component('system-mozo-index', SystemMozoIndex);
+Vue.component('marketplace-admin', MarketplaceAdmin);
+Vue.component('system-guest-register-register', SystemGuestRegister);
+Vue.component('system-guest-register-plan-panel', SystemGuestRegisterPlanPanel);
+Vue.component('system-guest-register-disabled', SystemGuestRegisterDisabled );
+Vue.component('x-input-service-guest', XImportServiceGuest);
+
+Vue.component('system-checkout-culqi', CheckoutCulqi)
+Vue.component('system-checkout-izipay', CheckoutIzipay)
+Vue.component('system-checkout-mercadopago', CheckoutMercadopago)
+Vue.component('checkout-admin', CheckoutAdmin)
+Vue.component('checkout-guest', CheckoutGuest)
+
+Vue.component('system-configuration-themes', SystemConfigurationThemes)
+Vue.component('system-configuration-visible-columns', SystemsVisibleColumns)
+Vue.component('system-configuration-sections', SystemConfigurationSections)
+
+Vue.component('system-storage-management-index', SystemStorageManagement)
+Vue.component('system-extra-services-index', SystemExtraServicesIndex);
+
+import VueClipboard from 'vue-clipboard2'
+Vue.use(VueClipboard)
+
+import moment from 'moment';
+
+Vue.mixin({
+    filters: {
+        toDecimals(number, decimal = 2) {
+            return Number(number).toFixed(decimal);
+        },
+        DecimalText: function (number, decimal = 2) {
+            return isNaN(parseFloat(number)) ? number : Number(number).toFixed(decimal);
+        },
+        toDate(date) {
+            if (date) {
+                return moment(date).format('DD/MM/YYYY');
+            }
+            return '';
+        },
+        toTime(time) {
+            if (time) {
+                if (time.length === 5) {
+                    return moment(time + ':00', 'HH:mm:ss').format('HH:mm:ss');
+                }
+                return moment(time, 'HH:mm:ss').format('HH:mm:ss');
+            }
+            return '';
+        },
+        pad(value, fill = '', length = 3) {
+            if (value) {
+                return String(value).padStart(length, fill);
+            }
+            return value;
+        }
+    },
+    methods: {
+        axiosError(error) {
+            const response = error.response;
+            const status = response.status;
+            if (status === 422) {
+                this.errors = response.data
+            }
+            if (status === 500) {
+                this.$message({
+                    type: 'info',
+                    message: response.data.message
+                });
+            }
+        },
+        getResponseValidations(success = true, message = null) {
+            return {
+                success: success,
+                message: message
+            }
+        },
+        generalSleep(ms) {
+            return new Promise(resolve => setTimeout(resolve, ms))
+        }
+    }
+})
+const app = new Vue({
+    store: store,
+    el: '#main-wrapper'
+});

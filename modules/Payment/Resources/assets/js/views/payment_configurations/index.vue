@@ -1,0 +1,521 @@
+<template>
+    <div class="card card-config">
+        <div class="card-header bg-info">
+            <h3 class="my-0">Configuración de pagos
+            </h3>
+            
+            <div class="card-actions white-text">
+                <a href="#" class="card-action card-action-toggle text-white" data-card-toggle=""></a>
+            </div>
+        </div>
+        <div class="card-body">
+
+            <el-tabs v-model="form.type" @tab-click="handleClick">
+
+                <el-tab-pane label="Yape" name="01">
+                    <div class="row pt-1">
+                        <div class="col-md-6">
+                            <h4 class="control-label">Habilitar</h4>
+                            <div :class="{'has-danger': errors.enabled_yape}"
+                                    class="form-group">
+                                <el-switch v-model="form.enabled_yape"
+                                            active-text="Si"
+                                            inactive-text="No"></el-switch>
+                                <small v-if="errors.enabled_yape"
+                                        class="form-control-feedback"
+                                        v-text="errors.enabled_yape[0]"></small>
+                            </div>
+                        </div>
+                        
+                        <template v-if="form.enabled_yape">
+
+                            <div class="col-md-6 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.telephone_yape}">
+                                    <label class="control-label">Número de teléfono <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.telephone_yape" placeholder="977523641"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.telephone_yape" v-text="errors.telephone_yape[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.name_yape}">
+                                    <label class="control-label">Nombres y Apellidos <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.name_yape"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.name_yape" v-text="errors.name_yape[0]"></small>
+                                </div>
+                            </div>
+
+
+                            <div class="col-md-6  mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.qrcode_yape}">
+                                    <label style="width: 210px;" class="control-label">Adjuntar código QR (Imágen) <span class="text-danger">*</span></label>
+                                    
+                                    <el-upload class="uploader"
+                                            :headers="headers"
+                                            :action="`/${resource}/upload-qrcode-yape`"
+                                            :show-file-list="false"
+                                            :on-success="onSuccess">
+                                        <img v-if="form.image_url_yape" :src="form.image_url_yape" class="avatar">
+                                        <i v-else class="el-icon-plus uploader-icon"></i>
+                                    </el-upload>
+                                    <small class="form-control-feedback" v-if="errors.qrcode_yape" v-text="errors.qrcode_yape[0]"></small>
+                                </div>
+                            </div>
+
+                        </template>
+        
+                    </div>
+                    <!-- <div class="form-actions text-right mt-3">
+                        <el-button type="primary" @click="submit" :loading="loading_submit">Guardar</el-button>
+                    </div> -->
+                </el-tab-pane>
+
+
+                <el-tab-pane label="Mercado Pago" name="02">
+
+                    <div class="row pt-1">
+                        <div class="col-md-6">
+                            <h4 class="control-label">Habilitar</h4>
+                            <div :class="{'has-danger': errors.enabled_mp}"
+                                    class="form-group">
+                                <el-switch v-model="form.enabled_mp"
+                                            active-text="Si"
+                                            inactive-text="No"></el-switch>
+                                <small v-if="errors.enabled_mp"
+                                        class="form-control-feedback"
+                                        v-text="errors.enabled_mp[0]"></small>
+                            </div>
+                        </div>
+                        
+                        <template v-if="form.enabled_mp">
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.public_key_mp}">
+                                    <label class="control-label">Token público <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.public_key_mp"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.public_key_mp" v-text="errors.public_key_mp[0]"></small>
+                                </div>
+                            </div>
+
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.access_token_mp}">
+                                    <label class="control-label">Token de acceso (privado) <span class="text-danger">*</span>
+                                        <el-tooltip class="item" effect="dark" content="Se muestran los últimos 8 caracteres del token guardado. Ingrese un valor nuevo para reemplazarlo." placement="top-end">
+                                            <i class="fa fa-info-circle"></i>
+                                        </el-tooltip>
+                                    </label>
+                                    <el-input
+                                        :value="accessTokenInputValue"
+                                        :type="accessTokenInputType"
+                                        :readonly="isShowingSavedAccessToken"
+                                        autocomplete="new-password"
+                                        placeholder=""
+                                        @input="onAccessTokenInput"
+                                        @focus="onAccessTokenFocus"
+                                        @blur="onAccessTokenBlur"
+                                    >
+                                        <span
+                                            slot="suffix"
+                                            class="access-token-mp-toggle"
+                                            @mousedown.prevent
+                                            @click="toggleAccessTokenVisibility"
+                                        >
+                                            <i
+                                                v-if="accessTokenMpRevealLoading"
+                                                class="fa fa-spinner fa-spin"
+                                            ></i>
+                                            <i
+                                                v-else
+                                                :class="accessTokenMpVisible ? 'fa fa-eye-slash' : 'fa fa-eye'"
+                                            ></i>
+                                        </span>
+                                    </el-input>
+                                    <small class="form-control-feedback" v-if="errors.access_token_mp" v-text="errors.access_token_mp[0]"></small>
+                                </div>
+                            </div>
+
+                        </template>
+        
+                    </div>
+                </el-tab-pane>
+                <el-tab-pane label="Culqi" name="03">
+                    <div class="row pt-1">
+                        <div class="col-md-12">
+                            <h4 class="control-label">Habilitar</h4>
+                            <div :class="{'has-danger': errors.enabled_culqi}"
+                                    class="form-group">
+                                <el-switch v-model="form.enabled_culqi"
+                                            active-text="Si"
+                                            inactive-text="No"></el-switch>
+                                <small v-if="errors.enabled_culqi"
+                                        class="form-control-feedback"
+                                        v-text="errors.enabled_culqi[0]"></small>
+                            </div>
+                        <template v-if="form.enabled_culqi">
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.telephone_yape}">
+                                    <label class="control-label">Public Key <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.publickey_culqi" placeholder="977523641"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.telephone_yape" v-text="errors.telephone_yape[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.name_yape}">
+                                    <label class="control-label">Private Key <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.privatekey_culqi"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.name_yape" v-text="errors.name_yape[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.name_yape}">
+                                    <label class="control-label">ID RSA <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.idrsa_culqi"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.name_yape" v-text="errors.name_yape[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.name_yape}">
+                                    <label class="control-label">RSA Key <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.rsa_culqi"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.name_yape" v-text="errors.name_yape[0]"></small>
+                                </div>
+                            </div>
+                        </template>
+
+                        </div>
+                    </div>
+                        
+                </el-tab-pane>
+
+                <el-tab-pane label="Izipay" name="04">
+                    <div class="row pt-1">
+                        <div class="col-md-12">
+                            <h4 class="control-label">Habilitar</h4>
+                            <div :class="{'has-danger': errors.enabled_izipay}"
+                                    class="form-group">
+                                <el-switch v-model="form.enabled_izipay"
+                                            active-text="Si"
+                                            inactive-text="No"></el-switch>
+                                <small v-if="errors.enabled_izipay"
+                                        class="form-control-feedback"
+                                        v-text="errors.enabled_izipay[0]"></small>
+                            </div>
+                        <template v-if="form.enabled_izipay">
+                            <div class="row">
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.username_izipay}">
+                                    <label class="control-label">Usuario <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.username_izipay" placeholder="977523641"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.username_izipay" v-text="errors.username_izipay[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.password_izipay}">
+                                    <label class="control-label">Contraseña <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.password_izipay"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.password_izipay" v-text="errors.password_izipay[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.publickey_izipay}">
+                                    <label class="control-label">Public Key <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.publickey_izipay"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.publickey_izipay" v-text="errors.publickey_izipay[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-12 mt-3">
+                                <div class="form-group" :class="{'has-danger': errors.sha256key_izipay}">
+                                    <label class="control-label">SHA256 Key <span class="text-danger">*</span></label>
+                                    <el-input v-model="form.sha256key_izipay"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.sha256key_izipay" v-text="errors.sha256key_izipay[0]"></small>
+                                </div>
+                            </div>
+                            </div>
+                        </template>
+                        </div>
+                    </div>
+                        
+                </el-tab-pane>
+                <div class="form-actions text-end mt-3">
+                    <el-button type="primary" @click="submit" :loading="loading_submit">Guardar</el-button>
+                </div>
+            </el-tabs>
+
+        </div> 
+    </div>
+</template>
+
+<style>
+.el-upload.el-upload--text{
+    width: 100%;
+}
+    .uploader-icon {
+        font-size: 28px;
+        color: #8c939d;
+        width: 208px;
+        height: 208px;
+        line-height: 208px;
+        text-align: center;
+    }
+
+    .access-token-mp-toggle {
+        display: inline-flex;
+        align-items: center;
+        height: 100%;
+        padding-right: 8px;
+        cursor: pointer;
+        color: #909399;
+    }
+
+
+</style>
+
+<script>
+
+    export default {
+        data() {
+            return {
+                headers: headers_token,
+                resource: 'payment-configurations',
+                recordId: null,
+                form: {},
+                errors: {},
+                loading_submit: false,
+                accessTokenMpVisible: false,
+                accessTokenMpEditing: false,
+                accessTokenMpDraft: null,
+                accessTokenMpRevealLoading: false,
+                accessTokenMpUnchangedSinceReveal: false,
+                payments: [
+                    {id: '01', description: 'Yape', enabled: 'enabled_yape'},
+                    {id: '02', description: 'Mercado Pago', enabled: 'enabled_mp'},
+                    {id: '03', description: 'Culqi', enabled: 'enabled_culqi'},
+                    {id: '04', description: 'Izipay', enabled: 'enabled_izipay'},
+                ],
+            }
+        },
+        computed: {
+            isShowingSavedAccessToken() {
+                return this.form.has_access_token_mp
+                    && !this.accessTokenMpDraft
+                    && !this.accessTokenMpEditing
+            },
+            accessTokenInputType() {
+                if (this.isShowingSavedAccessToken) {
+                    return 'text'
+                }
+
+                return this.accessTokenMpVisible ? 'text' : 'password'
+            },
+            accessTokenInputValue() {
+                if (this.isShowingSavedAccessToken) {
+                    const suffix = this.form.access_token_mp_suffix || ''
+
+                    if (!suffix) {
+                        return ''
+                    }
+
+                    const totalLength = this.form.access_token_mp_length || suffix.length
+                    const hiddenLength = Math.max(totalLength - suffix.length, 0)
+
+                    return '*'.repeat(hiddenLength) + suffix
+                }
+
+                return this.accessTokenMpDraft || ''
+            },
+        },
+        async created() {
+            await this.initForm()
+            await this.getData()
+        },
+        methods: {
+            onAccessTokenInput(value) {
+                this.accessTokenMpDraft = value
+                this.accessTokenMpUnchangedSinceReveal = false
+            },
+            onAccessTokenFocus() {
+                if (this.isShowingSavedAccessToken) {
+                    this.accessTokenMpEditing = true
+                    this.accessTokenMpDraft = ''
+                    this.accessTokenMpVisible = false
+                    this.accessTokenMpUnchangedSinceReveal = false
+                }
+            },
+            onAccessTokenBlur() {
+                if (this.accessTokenMpVisible) {
+                    this.maskAccessTokenMp()
+                }
+
+                if (this.accessTokenMpEditing && !this.accessTokenMpDraft) {
+                    this.accessTokenMpEditing = false
+                }
+            },
+            maskAccessTokenMp() {
+                this.accessTokenMpVisible = false
+
+                if (this.accessTokenMpUnchangedSinceReveal) {
+                    this.accessTokenMpDraft = null
+                }
+            },
+            async revealAccessTokenMp() {
+                this.accessTokenMpRevealLoading = true
+
+                try {
+                    const { data } = await this.$http.get(`/${this.resource}/access-token-mp`)
+
+                    if (!data.success || !data.access_token_mp) {
+                        throw new Error(data.message || 'No se pudo obtener el token de acceso')
+                    }
+
+                    this.accessTokenMpDraft = data.access_token_mp
+                    this.accessTokenMpVisible = true
+                    this.accessTokenMpUnchangedSinceReveal = true
+                    this.accessTokenMpEditing = false
+                } catch (error) {
+                    const message = error.response?.data?.message
+                        || error.message
+                        || 'No se pudo obtener el token de acceso'
+
+                    this.$message.error(message)
+                } finally {
+                    this.accessTokenMpRevealLoading = false
+                }
+            },
+            async toggleAccessTokenVisibility() {
+                if (this.accessTokenMpRevealLoading) {
+                    return
+                }
+
+                if (this.accessTokenMpVisible) {
+                    this.maskAccessTokenMp()
+                    return
+                }
+
+                if (this.isShowingSavedAccessToken) {
+                    await this.revealAccessTokenMp()
+                    return
+                }
+
+                this.accessTokenMpVisible = true
+            },
+            resetAccessTokenMpState() {
+                this.accessTokenMpVisible = false
+                this.accessTokenMpEditing = false
+                this.accessTokenMpDraft = null
+                this.accessTokenMpRevealLoading = false
+                this.accessTokenMpUnchangedSinceReveal = false
+            },
+            handleClick(){
+
+            },
+            submit(){
+
+                this.loading_submit = true
+
+                const payload = { ...this.form }
+
+                if (payload.type === '02') {
+                    if (this.accessTokenMpDraft) {
+                        payload.access_token_mp = this.accessTokenMpDraft
+                    } else if (this.form.has_access_token_mp) {
+                        delete payload.access_token_mp
+                    }
+                }
+
+                this.$http.post(`/${this.resource}`, payload)
+                    .then(response => {
+                        if (response.data && response.data.success) {
+                            this.$message.success(response.data.message || 'Configuración actualizada')
+
+                            if (this.form.type === '02' && this.accessTokenMpDraft) {
+                                this.form.has_access_token_mp = true
+                                this.form.access_token_mp_suffix = this.accessTokenMpDraft.slice(-8)
+                                this.form.access_token_mp_length = this.accessTokenMpDraft.length
+                                this.resetAccessTokenMpState()
+                            }
+                        } else {
+                            this.$message.error((response.data && response.data.message) || 'No se pudo guardar la configuración')
+                        }
+                    })
+                    .catch(error => {
+                        if (error.response && error.response.status === 422) {
+                            const data = error.response.data || {}
+                            this.errors = data.errors || data
+                            const firstError = data.errors
+                                ? Object.values(data.errors).flat()[0]
+                                : null
+                            this.$message.error(firstError || data.message || 'Error de validación')
+                        } else {
+                            console.log(error)
+                            const message = error.response && error.response.data
+                                ? error.response.data.message
+                                : null
+                            this.$message.error(message || 'Error al guardar la configuración')
+                        }
+                    })
+                    .then(() => {
+                        this.loading_submit = false
+                    })
+
+            },
+            onSuccess(response) { 
+
+                if (response.success) {
+                    this.form.qrcode_yape = response.data.filename
+                    this.form.image_url_yape = response.data.temp_image
+                    this.form.temp_path_yape = response.data.temp_path 
+                } else {
+                    this.$message.error(response.message)
+                }
+            },
+            initForm(){
+
+                this.form = {
+                    enabled_yape : false,
+                    name_yape : null,
+                    telephone_yape: null,
+                    type: '01',
+
+                    qrcode_yape : null,
+                    image_url_yape: null,
+                    temp_path_yape: null,
+
+                    
+                    enabled_mp : false,
+                    access_token_mp: null,
+                    public_key_mp: null,
+                    has_access_token_mp: false,
+                    access_token_mp_suffix: null,
+                    access_token_mp_length: null,
+                    default_payment_for_payment_links: null,
+                }
+
+                this.errors = {}
+
+            },
+            async getData() {
+                await this.$http.get(`/${this.resource}/record`)
+                    .then(response => {
+                        const data = response.data.data
+
+                        this.form = {
+                            ...data,
+                            type: '01',
+                            access_token_mp: null,
+                            has_access_token_mp: !!data.has_access_token_mp,
+                            access_token_mp_suffix: data.access_token_mp_suffix || null,
+                            access_token_mp_length: data.access_token_mp_length || null,
+                        }
+
+                        this.resetAccessTokenMpState()
+                    })
+            }, 
+        }
+    }
+</script>

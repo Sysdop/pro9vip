@@ -1,0 +1,1221 @@
+<?php
+
+namespace Modules\Inventory\Providers;
+
+use App\Models\Tenant\DocumentItem;
+use App\Models\Tenant\Document;
+use App\Models\Tenant\Item;
+use App\Models\Tenant\PurchaseItem;
+use App\Models\Tenant\PurchaseSettlementItem;
+use App\Models\Tenant\SaleNoteItem;
+use Exception;
+use Illuminate\Support\ServiceProvider;
+use Modules\Inventory\Traits\InventoryTrait;
+use Modules\Order\Models\OrderNote;
+use Modules\Order\Models\OrderNoteItem;
+use Modules\Item\Models\ItemLotsGroup;
+use Modules\Item\Models\ItemLot;
+use Modules\Inventory\Models\DevolutionItem;
+use Modules\Inventory\Models\Inventory;
+use Modules\Inventory\Models\InventoryTransfer;
+use Modules\Inventory\Models\InventoryTransferItem;
+use App\Models\Tenant\DispatchItem;
+
+
+/**
+ * Se debe tener en cuenta este provider para llevar el control de Kardex
+ */
+class InventoryKardexServiceProvider extends ServiceProvider
+{
+    use InventoryTrait;
+
+    public function register() {
+        //
+    }
+
+    public function boot() {
+        $this->purchase();
+        $this->purchase_settlement();
+        $this->sale();
+        $this->sale_note();
+        $this->sale_note_item_delete();
+        $this->sale_document_type_03_delete();
+        $this->order_note();
+        $this->order_note_item_delete();
+        $this->purchase_item_delete();
+        $this->purchase_item_settlement_delete();
+        $this->item_lot_delete();
+
+        $this->devolution();
+
+        $this->dispatch();
+        $this->document_item_delete();
+
+    }
+
+    /**
+     *Se dispara luego de crear la compra.
+     */
+    private function purchase() {
+        PurchaseItem::created(function (PurchaseItem $purchase_item) {
+
+            $presentationQuantity = (!empty($purchase_item->item->presentation)) ? $purchase_item->item->presentation->quantity_unit : 1;
+
+            $warehouse = ($purchase_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id) : $this->findWarehouse();
+            // $warehouse = $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id);
+            // $warehouse = $this->findWarehouse();
+            //$this->createInventory($purchase_item->item_id, $purchase_item->quantity, $warehouse->id);
+            $this->createInventoryKardex($purchase_item->purchase, $purchase_item->item_id, /*$purchase_item->quantity*/ ($purchase_item->quantity * $presentationQuantity), $warehouse->id);
+            $this->updateStock($purchase_item->item_id, ($purchase_item->quantity * $presentationQuantity), $warehouse->id);
+        });
+    }
+
+    /**
+     *Se dispara luego de crear la compra.
+     */
+    private function purchase_settlement() {
+        PurchaseSettlementItem::created(function (PurchaseSettlementItem $purchase_item) {
+            /* dd($purchase_item); */
+            $presentationQuantity = (!empty($purchase_item->item->presentation)) ? $purchase_item->item->presentation->quantity_unit : 1;
+
+            $warehouse = ($purchase_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id) : $this->findWarehouse();
+            // $warehouse = $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id);
+            // $warehouse = $this->findWarehouse();
+            //$this->createInventory($purchase_item->item_id, $purchase_item->quantity, $warehouse->id);
+            $inve=$this->createInventoryKardex($purchase_item->purchase_settlement, $purchase_item->item_id, /*$purchase_item->quantity*/ ($purchase_item->quantity * $presentationQuantity), $warehouse->id);
+            /* dd($inve); */
+            $this->updateStock($purchase_item->item_id, ($purchase_item->quantity * $presentationQuantity), $warehouse->id);
+        });
+    }
+
+
+    /**
+     * Se dispara cuando se realiza una venta
+     */
+    private function sale() {
+
+        DocumentItem::created(function (DocumentItem $document_item) {
+            // si es nota credito tipo 13, no se asocia a inventario
+            if($document_item->document->isCreditNoteAndType13()) return;
+
+            if (!$document_item->item->is_set)
+            {
+                $presentationQuantity = (!empty($document_item->item->presentation)) ? $document_item->item->presentation->quantity_unit : 1;
+                $document = $document_item->document;
+                $factor = ($document->document_type_id === '07') ? 1 : -1;
+                $warehouse = ($document_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($document_item->warehouse_id)->establishment_id) : $this->findWarehouse();
+                //$this->createInventory($document_item->item_id, $factor * $document_item->quantity, $warehouse->id);
+                $this->createInventoryKardex($document_item->document, $document_item->item_id, ($factor * ($document_item->quantity * $presentationQuantity)), $warehouse->id);
+
+                if (!$document_item->document->sale_note_id && !$document_item->document->order_note_id && !$document_item->document->dispatch_id && !$document_item->document->sale_notes_relateds)
+                {
+                    $this->updateStock($document_item->item_id, ($factor * ($document_item->quantity * $presentationQuantity)), $warehouse->id);
+
+                } else
+                {
+                    if ($document_item->document->dispatch)
+                    {
+                        if (!$document_item->document->dispatch->transfer_reason_type->discount_stock) {
+                            $this->updateStock($document_item->item_id, ($factor * ($document_item->quantity * $presentationQuantity)), $warehouse->id);
+                        }
+                    }
+                }
+
+            } else {
+
+                $item = Item::findOrFail($document_item->item_id);
+
+                foreach ($item->sets as $it) {
+                    /** @var Item $ind_item */
+                    $ind_item = $it->individual_item;
+                    $item_set_quantity = ($it->quantity) ? $it->quantity : 1;
+                    $presentationQuantity = 1;
+                    $document = $document_item->document;
+                    $factor = ($document->document_type_id === '07') ? 1 : -1;
+                    $warehouse = $this->findWarehouse();
+                    $this->createInventoryKardex($document_item->document, $ind_item->id, ($factor * ($document_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+
+                    if (!$document_item->document->sale_note_id && !$document_item->document->order_note_id && !$document_item->document->dispatch_id && !$document_item->document->sale_notes_relateds)
+                    {
+                        $this->updateStock($ind_item->id, ($factor * ($document_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+                    } else {
+                        if ($document_item->document->dispatch) {
+                            if (!$document_item->document->dispatch->transfer_reason_type->discount_stock) {
+                                $this->updateStock($ind_item->id, ($factor * ($document_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+                            }
+                        }
+                    }
+
+                }
+            }
+
+            // Procesar productos fusionados desde data_json
+            $this->processMergedProducts($document_item);
+
+            // Procesar modificadores aplicados
+            $this->processModifiersApplied($document_item);
+
+            /*
+             * Calculando el stock por lote por factor según la unidad
+             */
+
+            if(!$document->isGeneratedFromExternalRecord())
+            {
+
+                if (isset($document_item->item->IdLoteSelected))
+                {
+                    if ($document_item->item->IdLoteSelected != null)
+                    {
+                        $productName = $document_item->item->description
+                            ?? ($document_item->item->name ?? 'sin nombre');
+
+                        if(is_array($document_item->item->IdLoteSelected))
+                        {
+                            // presentacion - factor de lista de precios
+                            $quantity_unit = isset($document_item->item->presentation->quantity_unit) ? $document_item->item->presentation->quantity_unit : 1;
+
+                            $lotesSelecteds = $document_item->item->IdLoteSelected;
+                            $document_factor = ($document->document_type_id === '07') ? 1 : -1;
+
+                            foreach ($lotesSelecteds as $item)
+                            {
+                                $lotId = is_array($item) ? ($item['id'] ?? null) : ($item->id ?? null);
+                                $compromiseQuantity = is_array($item)
+                                    ? ($item['compromise_quantity'] ?? 0)
+                                    : ($item->compromise_quantity ?? 0);
+
+                                if ($lotId === null || $lotId === '') {
+                                    throw new Exception("Lote vacío o sin identificador para el producto [{$productName}]");
+                                }
+
+                                $lot = ItemLotsGroup::query()->find($lotId);
+                                if (!$lot) {
+                                    throw new Exception("Lote no encontrado (id: {$lotId}) para el producto [{$productName}]");
+                                }
+
+                                $lot->quantity = $lot->quantity + (($quantity_unit * $compromiseQuantity) * $document_factor);
+                                $this->validateStockLotGroup($lot, $document_item);
+                                $lot->save();
+                            }
+
+                        }
+                        else{
+
+                            $lotId = $document_item->item->IdLoteSelected;
+                            $lot = ItemLotsGroup::query()->find($lotId);
+                            if (!$lot) {
+                                throw new Exception("Lote no encontrado (id: {$lotId}) para el producto [{$productName}]");
+                            }
+
+                            try {
+                                $quantity_unit = $document_item->item->presentation->quantity_unit;
+                            } catch (Exception $e) {
+                                $quantity_unit = 1;
+                            }
+                            if ($document->document_type_id === '07') {
+                                $quantity = $lot->quantity + ($quantity_unit * $document_item->quantity);
+                            } else {
+                                $quantity = $lot->quantity - ($quantity_unit * $document_item->quantity);
+                            }
+
+                            $lot->quantity = $quantity;
+                            $lot->save();
+                        }
+
+                    }
+                }
+            }
+
+            if (isset($document_item->item->lots)) {
+                foreach ($document_item->item->lots as $it) {
+
+                    if ($it->has_sale == true) {
+                        $r = ItemLot::find($it->id);
+                        // $r->has_sale = true;
+                        $r->has_sale = ($document->document_type_id === '07') ? false : true;
+                        $r->save();
+                    }
+
+                }
+                /*if($document_item->item->IdLoteSelected != null)
+                {
+                    $lot = ItemLotsGroup::find($document_item->item->IdLoteSelected);
+                    $lot->quantity = ($lot->quantity - $document_item->quantity);
+                    $lot->save();
+                }*/
+            }
+
+        });
+    }
+
+
+    /**
+     * Se dispara  al generar una nota de venta
+     */
+    private function sale_note()
+    {
+        SaleNoteItem::created(function (SaleNoteItem $sale_note_item) {
+
+            if(!$sale_note_item->item->is_set){
+
+                $presentationQuantity = (!empty($sale_note_item->item->presentation)) ? $sale_note_item->item->presentation->quantity_unit : 1;
+
+                // $warehouse = $this->findWarehouse($sale_note_item->sale_note->establishment_id);
+                $warehouse = ($sale_note_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($sale_note_item->warehouse_id)->establishment_id) : $this->findWarehouse($sale_note_item->sale_note->establishment_id);
+
+                // $this->createInventoryKardex($sale_note_item->sale_note, $sale_note_item->item_id, (-1 * ($sale_note_item->quantity * $presentationQuantity)), $warehouse->id);
+                $this->createInventoryKardexSaleNote($sale_note_item->sale_note, $sale_note_item->item_id, (-1 * ($sale_note_item->quantity * $presentationQuantity)), $warehouse->id, $sale_note_item->id);
+                if(!$sale_note_item->sale_note->order_note_id) $this->updateStock($sale_note_item->item_id, (-1 * ($sale_note_item->quantity * $presentationQuantity)), $warehouse->id);
+
+            }else{
+
+                $item = Item::findOrFail($sale_note_item->item_id);
+
+                foreach ($item->sets as $it) {
+
+                    $ind_item  = $it->individual_item;
+                    $item_set_quantity  = ($it->quantity) ? $it->quantity : 1;
+                    $presentationQuantity = 1;
+                    $warehouse = $this->findWarehouse($sale_note_item->sale_note->establishment_id);
+                    // $this->createInventoryKardex($sale_note_item->sale_note, $ind_item->id , (-1 * ($sale_note_item->quantity * $presentationQuantity)), $warehouse->id);
+                    $this->createInventoryKardexSaleNote($sale_note_item->sale_note, $ind_item->id , (-1 * ($sale_note_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id, $sale_note_item->id);
+                    if(!$sale_note_item->sale_note->order_note_id) $this->updateStock($ind_item->id , (-1 * ($sale_note_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+
+                }
+
+            }
+
+            // Procesar productos fusionados desde item JSON
+            $this->processMergedProductsSaleNote($sale_note_item);
+
+            // Procesar modificadores aplicados
+            $this->processModifiersAppliedSaleNote($sale_note_item);
+
+            // series
+            if(isset($sale_note_item->item->lots) )
+            {
+                foreach ($sale_note_item->item->lots as $it)
+                {
+                    if($it->has_sale == true)
+                    {
+                        $r = ItemLot::find($it->id);
+                        $r->has_sale =  true;
+                        $r->save();
+                    }
+                }
+            }
+            // series
+
+        });
+    }
+
+
+    /**
+     * @param $item_id
+     * @param $quantity
+     * @param $warehouse_id
+     */
+    private function createInventory($item_id, $quantity, $warehouse_id) {
+        if(!$this->checkInventory($item_id, $warehouse_id)) {
+            $item = $this->findItem($item_id);
+            $this->createInitialInventory($item_id, $item->stock + (-1 * $quantity), $warehouse_id);
+        }
+    }
+
+
+    /**
+     * Se dispara al borrar un item de nota de venta
+     */
+    private function sale_note_item_delete()
+    {
+
+        SaleNoteItem::deleted(function (SaleNoteItem $sale_note_item) {
+
+            // dd($sale_note_item);
+
+            if(!$sale_note_item->item->is_set){
+
+                $presentationQuantity = (!empty($sale_note_item->item->presentation)) ? $sale_note_item->item->presentation->quantity_unit : 1;
+
+                // $warehouse = $this->findWarehouse();
+                $warehouse = ($sale_note_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($sale_note_item->warehouse_id)->establishment_id) : $this->findWarehouse($sale_note_item->sale_note->establishment_id);
+
+                $this->createInventoryKardex($sale_note_item->sale_note, $sale_note_item->item_id, ($sale_note_item->quantity * $presentationQuantity), $warehouse->id);
+                // $this->deleteInventoryKardex($sale_note_item->sale_note, $sale_note_item->inventory_kardex_id);
+                $this->updateStock($sale_note_item->item_id, (1 * ($sale_note_item->quantity * $presentationQuantity)), $warehouse->id);
+
+            }else{
+
+                $item = Item::findOrFail($sale_note_item->item_id);
+
+                foreach ($item->sets as $it) {
+
+                    $ind_item  = $it->individual_item;
+                    $item_set_quantity  = ($it->quantity) ? $it->quantity : 1;
+                    $presentationQuantity = 1;
+                    $warehouse = $this->findWarehouse();
+
+                    $this->createInventoryKardex($sale_note_item->sale_note, $ind_item->id, ($sale_note_item->quantity * $presentationQuantity * $item_set_quantity), $warehouse->id);
+                    // $this->deleteInventoryKardex($sale_note_item->sale_note, $sale_note_item->inventory_kardex_id);
+
+                    $this->updateStock($ind_item->id , (1 * ($sale_note_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+
+                }
+
+            }
+
+            $this->deleteItemLots($sale_note_item);
+
+        });
+    }
+
+
+    /**
+     * Se dispara al borrar un documento tipo 3
+     */
+    private function sale_document_type_03_delete() {
+
+        Document::deleted(function(Document $document) {
+
+            if($document->document_type_id === '03' && $document->state_type_id === '01'){
+
+                foreach ($document->items as $document_item) {
+
+
+                    if(!$document_item->item->is_set){
+
+                        $presentationQuantity = (!empty($document_item->item->presentation)) ? $document_item->item->presentation->quantity_unit : 1;
+
+                        $factor = 1;
+                        $warehouse = $this->findWarehouse();
+
+                        $this->deleteAllInventoryKardexByModel($document);
+
+                        if(!$document->sale_note_id) $this->updateStock($document_item->item_id, ($factor * ($document_item->quantity * $presentationQuantity)), $warehouse->id);
+
+                    }
+                    else{
+
+                        $item = Item::findOrFail($document_item->item_id);
+
+                        foreach ($item->sets as $it) {
+
+                            $ind_item  = $it->individual_item;
+                            $item_set_quantity  = ($it->quantity) ? $it->quantity : 1;
+                            $presentationQuantity = 1;
+                            $factor = 1;
+                            $warehouse = $this->findWarehouse();
+
+                            $this->deleteAllInventoryKardexByModel($document);
+                            if(!$document->sale_note_id) $this->updateStock($ind_item->id, ($factor * ($document_item->quantity * $presentationQuantity * $item_set_quantity)), $warehouse->id);
+
+                        }
+
+                    }
+
+                }
+            }
+
+
+        });
+    }
+
+    /**
+     * Se dispara al generar un pedido
+     */
+    private function order_note() {
+
+        OrderNoteItem::created(function (OrderNoteItem $order_note_item) {
+            /** @todo bloque repetido, buscar colocar en funcion */
+            $item = $order_note_item->item;
+            $document = $order_note_item->order_note;
+            $warehouse_id = $order_note_item->warehouse_id;
+
+            $presentationQuantity = $item->presentation->quantity_unit ?? 1;
+            // $warehouse = $this->findWarehouse($order_note_item->order_note->establishment_id);
+            // $warehouse = ($warehouse_id) ? $this->findWarehouse($this->findWarehouseById($warehouse_id)->establishment_id) : $this->findWarehouse($order_note_item->order_note->establishment_id);
+            $item_id =$order_note_item->item_id;
+            // $factor = 1;
+            // Factor proviende de Document.
+             $factor = ($document->document_type_id  && $document->document_type_id === '07') ? 1 : -1;
+
+            if (!$item->is_set) {
+                $presentationQuantity = $item->presentation->quantity_unit ?? 1;
+                $quanty = ($factor * ($order_note_item->quantity * $presentationQuantity));
+
+                $warehouse = ($warehouse_id) ?
+                    $this->findWarehouse($this->findWarehouseById($warehouse_id)->establishment_id) :
+                    $this->findWarehouse();
+                //$this->createInventory($item_id, $factor * $order_note_item->quantity, $warehouse->id);
+                $this->createInventoryKardex($document, $item_id, $quanty, $warehouse->id);
+                if (!$document->sale_note_id && !$document->order_note_id && !$document->dispatch_id) {
+                    $this->updateStock($item_id, ($quanty), $warehouse->id);
+                } else {
+                    if ($document->dispatch) {
+                        if (!$document->dispatch->transfer_reason_type->discount_stock) {
+                            $this->updateStock($item_id, ($quanty), $warehouse->id);
+                        }
+                    }
+                }
+
+            } else {
+
+                $item = Item::findOrFail($item_id);
+                foreach ($item->sets as $it) {
+                    /** @var Item $ind_item */
+
+                    $ind_item = $it->individual_item;
+                    $item_id = $ind_item->id;
+                    $item_set_quantity = ($it->quantity) ?: 1;
+                    $presentationQuantity = 1;
+
+                    $warehouse = $this->findWarehouse();
+                    $quanty = $factor * ($order_note_item->quantity * $presentationQuantity * $item_set_quantity);
+
+                    $this->createInventoryKardex($document, $item_id, ($quanty), $warehouse->id);
+
+                    if (!$document->sale_note_id && !$document->order_note_id && !$document->dispatch_id) {
+                        $this->updateStock($item_id, ($quanty), $warehouse->id);
+                    } else {
+                        if ($document->dispatch) {
+                            if (!$document->dispatch->transfer_reason_type->discount_stock) {
+                                $this->updateStock($item_id, ($quanty), $warehouse->id);
+                            }
+                        }
+                    }
+
+                }
+            }
+
+
+            // $this->createInventoryKardex($order_note_item->order_note, $order_note_item->item_id, (-1 * ($order_note_item->quantity * $presentationQuantity)), $warehouse->id);
+            // $this->updateStock($order_note_item->item_id, (-1 * ($order_note_item->quantity * $presentationQuantity)), $warehouse->id);
+
+            // control de lotes
+            if (isset($order_note_item->item->IdLoteSelected))
+            {
+                $IdLoteSelected = $order_note_item->item->IdLoteSelected;
+
+                if(is_array($IdLoteSelected))
+                {
+                    foreach ($IdLoteSelected as $lot_selected)
+                    {
+                        $lot = ItemLotsGroup::find($lot_selected->id);
+                        $lot->quantity = $lot->quantity - ($lot_selected->compromise_quantity * $presentationQuantity ?? 1);
+                        $lot->save();
+                    }
+                }
+            }
+            else
+            {
+
+            if (isset($order_note_item->item->lots_group)) {
+                    if(is_array($order_note_item->item->lots_group) && count($order_note_item->item->lots_group) > 0) {
+                            $lots_group = $order_note_item->item->lots_group;
+
+                            foreach ($lots_group as $item) {
+                                $lot = ItemLotsGroup::query()->find($item->id);
+                                $lot->quantity = $lot->quantity - $item->compromise_quantity;
+                                $lot->save();
+                            }
+                    }
+            }
+
+            }
+            // control de lotes
+
+
+
+            if(isset($item->lots) )
+            {
+                foreach ($item->lots as $it) {
+
+                    if($it->has_sale == true)
+                    {
+                        $r = ItemLot::find($it->id);
+                        $r->has_sale = true;
+                        $r->save();
+                    }
+
+                }
+            }
+
+
+
+        });
+    }
+
+
+    /**
+     * Se dispara cuando se borra un item de pedido
+     */
+    private function order_note_item_delete() {
+
+        OrderNoteItem::deleted(function (OrderNoteItem $order_note_item) {
+
+
+
+            // dd($order_note_item);
+            $presentationQuantity = (!empty($order_note_item->item->presentation)) ? $order_note_item->item->presentation->quantity_unit : 1;
+
+            // $warehouse = $this->findWarehouse($order_note_item->order_note->establishment_id);
+            $warehouse = ($order_note_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($order_note_item->warehouse_id)->establishment_id) : $this->findWarehouse($order_note_item->order_note->establishment_id);
+
+            $this->createInventoryKardex($order_note_item->order_note, $order_note_item->item_id , (1 * ($order_note_item->quantity * $presentationQuantity)), $warehouse->id);
+
+            $this->updateStock($order_note_item->item_id, (1 * ($order_note_item->quantity * $presentationQuantity)), $warehouse->id);
+
+
+            if (isset($order_note_item->item->lots_group)) {
+                if(is_array($order_note_item->item->lots_group) && count($order_note_item->item->lots_group) > 0) {
+                        $lots_group = $order_note_item->item->lots_group;
+
+                        foreach ($lots_group as $item) {
+                            $lot = ItemLotsGroup::query()->find($item->id);
+                            $lot->quantity = $lot->quantity + $item->compromise_quantity;
+                            $lot->save();
+                        }
+                }
+            }
+
+
+        });
+
+
+
+
+    }
+
+    /**
+     * Se dispara cuando se borra un item de compra
+     */
+    private function purchase_item_delete()
+    {
+        PurchaseItem::deleted(function (PurchaseItem $purchase_item) {
+
+
+            $presentationQuantity = (!empty($purchase_item->item->presentation)) ? $purchase_item->item->presentation->quantity_unit : 1;
+
+            $warehouse = ($purchase_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id) : $this->findWarehouse();
+
+            $this->verifyHasSaleLots($purchase_item);
+            $this->verifyHasSaleLotsGroup($purchase_item);
+
+            $this->deleteItemSeriesAndGroup($purchase_item);
+
+            $this->createInventoryKardex($purchase_item->purchase, $purchase_item->item_id, (-1 * ($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+            // $this->updateStock($purchase_item->item_id, (-1 *($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+            $this->updateStockPurchase($purchase_item->item_id, (-1 *($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+
+        });
+    }
+
+    /**
+     * Se dispara cuando se borra un item de compra
+     */
+    private function purchase_item_settlement_delete()
+    {
+        PurchaseSettlementItem::deleted(function (PurchaseSettlementItem $purchase_item) {
+
+
+            $presentationQuantity = (!empty($purchase_item->item->presentation)) ? $purchase_item->item->presentation->quantity_unit : 1;
+
+            $warehouse = ($purchase_item->warehouse_id) ? $this->findWarehouse($this->findWarehouseById($purchase_item->warehouse_id)->establishment_id) : $this->findWarehouse();
+
+            $this->verifyHasSaleLots($purchase_item);
+            $this->verifyHasSaleLotsGroup($purchase_item);
+
+            $this->deleteItemSeriesAndGroup($purchase_item);
+
+            $this->createInventoryKardex($purchase_item->purchase_settlement, $purchase_item->item_id, (-1 * ($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+            // $this->updateStock($purchase_item->item_id, (-1 *($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+            $this->updateStockPurchase($purchase_item->item_id, (-1 *($purchase_item->quantity * $presentationQuantity)), $warehouse->id);
+
+        });
+    }
+
+    /**
+     * Se dispara cuando se borra un item de lote de item
+     */
+    private function item_lot_delete()
+    {
+        /*ItemLot::deleted(function(ItemLot $item_lot) {
+
+            if((bool)$item_lot->has_sale)
+            {
+                throw new Exception("La serie {$item_lot->series} ha sido vendida!");
+            }
+        });*/
+    }
+
+
+    /**
+     * Se dispara cuando se genera una devolucion
+     */
+    private function devolution() {
+
+        DevolutionItem::created(function(DevolutionItem $devolution_item) {
+
+            $devolution = $devolution_item->devolution;
+
+            $warehouse = $this->findWarehouse($devolution_item->devolution->establishment_id);
+
+            //$this->createInventory($devolution_item->item_id, $factor * $devolution_item->quantity, $warehouse->id);
+            $this->createInventoryKardex($devolution_item->devolution, $devolution_item->item_id, -$devolution_item->quantity, $warehouse->id);
+
+            $this->updateStock($devolution_item->item_id, -$devolution_item->quantity, $warehouse->id);
+
+            // Lotes de vencimiento (cabecera)
+            $lots_group = $devolution_item->item->IdLoteSelected
+                ?? $devolution_item->item->lots_group_selected
+                ?? $devolution_item->item->lots_group
+                ?? null;
+
+            if (!is_null($lots_group) && $lots_group !== '') {
+                if (is_string($lots_group)) {
+                    $lots_group = json_decode($lots_group, true);
+                }
+
+                if (is_array($lots_group)) {
+                    foreach ($lots_group as $item) {
+                        $item = (array) $item;
+                        if (empty($item['id'])) {
+                            continue;
+                        }
+                        $lot = ItemLotsGroup::find($item['id']);
+                        if (!$lot) {
+                            continue;
+                        }
+                        $qty = isset($item['compromise_quantity'])
+                            ? (float) $item['compromise_quantity']
+                            : (float) $devolution_item->quantity;
+                        $lot->quantity = $lot->quantity - $qty;
+                        $lot->save();
+                    }
+                } elseif (is_numeric($lots_group)) {
+                    $lot = ItemLotsGroup::find($lots_group);
+                    if ($lot) {
+                        $lot->quantity = $lot->quantity - $devolution_item->quantity;
+                        $lot->save();
+                    }
+                }
+            }
+
+            // Series: marcar como inactivas las seleccionadas en la devolución
+            $series = $devolution_item->item->lots
+                ?? $devolution_item->item->lots_selected
+                ?? [];
+
+            foreach ((array) $series as $it) {
+                $it = (object) $it;
+                // En el selector de series, las elegidas llegan con has_sale = true
+                if (empty($it->id) || empty($it->has_sale)) {
+                    continue;
+                }
+                $r = ItemLot::find($it->id);
+                if (!$r) {
+                    continue;
+                }
+                $r->has_sale = true;
+                $r->state = 'Inactivo';
+                $r->save();
+            }
+
+        });
+    }
+
+
+    /**
+     * Se dispara cuando se genera un despacho
+     */
+    private function dispatch() {
+
+        DispatchItem::created(function(DispatchItem $dispatch_item) {
+            $dispatch = $dispatch_item->dispatch;
+            if($dispatch->document_type_id === '09') {
+                if($dispatch->transfer_reason_type->discount_stock){
+
+                    // Traslado entre establecimientos: crear registro en Movimiento > Traslados
+                    // (type 2 mueve stock origen→destino; evita el doble descuento del flujo simple)
+                    if ($dispatch->transfer_reason_type_id === '04') {
+                        $this->createInventoryTransferFromDispatchItem($dispatch, $dispatch_item);
+                        return;
+                    }
+
+                    $warehouse = $this->findWarehouse();
+
+                    $this->createInventoryKardex($dispatch, $dispatch_item->item_id, -$dispatch_item->quantity, $warehouse->id);
+
+                    if(!$dispatch->reference_sale_note_id && !$dispatch->reference_order_note_id && !$dispatch->reference_document_id){
+
+                        $this->updateStock($dispatch_item->item_id, -$dispatch_item->quantity, $warehouse->id);
+
+                        if(isset($dispatch_item->item->IdLoteSelected)){
+
+                            if($dispatch_item->item->IdLoteSelected != null){
+
+                                $lot = ItemLotsGroup::query()->find($dispatch_item->item->IdLoteSelected);
+                                if ($lot) {
+                                    $lot->quantity = $lot->quantity - $dispatch_item->quantity;
+                                    $lot->save();
+                                }
+
+                            }
+                        }
+
+                        // Marcar series como vendidas (mismo criterio que factura/NV).
+                        // Sin esto el kardex por series sigue en DISPONIBLE aunque la guía ya descontó stock.
+                        if (isset($dispatch_item->item->lots)) {
+                            foreach ((array) $dispatch_item->item->lots as $it) {
+                                $it = (object) $it;
+                                if (empty($it->id) || empty($it->has_sale)) {
+                                    continue;
+                                }
+                                $itemLot = ItemLot::find($it->id);
+                                if ($itemLot) {
+                                    $itemLot->has_sale = true;
+                                    $itemLot->save();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+
+    /**
+     * Crea/actualiza InventoryTransfer ligado a la guía (motivo 04).
+     * El detalle del traslado muestra el número de la guía (ej. T001-10).
+     */
+    private function createInventoryTransferFromDispatchItem($dispatch, DispatchItem $dispatch_item): void
+    {
+        $destinationEstablishmentId = $this->resolveDispatchDestinationEstablishmentId($dispatch);
+        if (!$destinationEstablishmentId || (int) $destinationEstablishmentId === (int) $dispatch->establishment_id) {
+            // Sin destino válido: mantiene el descuento simple en el almacén de origen
+            $warehouse = $this->findWarehouse($dispatch->establishment_id);
+            $this->createInventoryKardex($dispatch, $dispatch_item->item_id, -$dispatch_item->quantity, $warehouse->id);
+            if (!$dispatch->reference_sale_note_id && !$dispatch->reference_order_note_id && !$dispatch->reference_document_id) {
+                $this->updateStock($dispatch_item->item_id, -$dispatch_item->quantity, $warehouse->id);
+            }
+            return;
+        }
+
+        $warehouseOrigin = $this->findWarehouse($dispatch->establishment_id);
+        $warehouseDestination = $this->findWarehouse($destinationEstablishmentId);
+
+        $transfer = InventoryTransfer::query()->where('dispatch_id', $dispatch->id)->first();
+
+        if (!$transfer) {
+            $series = \App\Models\Tenant\Series::query()
+                ->where('establishment_id', $dispatch->establishment_id)
+                ->where('document_type_id', 'U4')
+                ->first();
+
+            $transfer = InventoryTransfer::query()->create([
+                'description' => $dispatch->number_full,
+                'dispatch_id' => $dispatch->id,
+                'warehouse_id' => $warehouseOrigin->id,
+                'warehouse_destination_id' => $warehouseDestination->id,
+                'quantity' => 0,
+                'document_type_id' => 'U4',
+                'series' => $series ? $series->number : 'NT',
+                'number' => '#',
+            ]);
+        }
+
+        $inventory = new Inventory();
+        $inventory->type = 2;
+        $inventory->description = 'Traslado';
+        $inventory->detail = $dispatch->number_full;
+        $inventory->item_id = $dispatch_item->item_id;
+        $inventory->warehouse_id = $warehouseOrigin->id;
+        $inventory->warehouse_destination_id = $warehouseDestination->id;
+        $inventory->quantity = $dispatch_item->quantity;
+        $inventory->inventories_transfer_id = $transfer->id;
+        $inventory->save();
+
+        $transfer->quantity = (float) $transfer->inventories()->sum('quantity');
+        $transfer->save();
+
+        if (isset($dispatch_item->item->IdLoteSelected) && $dispatch_item->item->IdLoteSelected != null) {
+            $lot = ItemLotsGroup::query()->find($dispatch_item->item->IdLoteSelected);
+            if ($lot) {
+                $lot->quantity = $lot->quantity - $dispatch_item->quantity;
+                $lot->save();
+                InventoryTransferItem::query()->create([
+                    'inventory_transfer_id' => $transfer->id,
+                    'item_lots_group_id' => $lot->id,
+                ]);
+            }
+        }
+
+        if (isset($dispatch_item->item->lots) && is_array($dispatch_item->item->lots)) {
+            foreach ($dispatch_item->item->lots as $lotData) {
+                $lotData = (object) $lotData;
+                if (!empty($lotData->has_sale) && !empty($lotData->id)) {
+                    $itemLot = ItemLot::find($lotData->id);
+                    if ($itemLot) {
+                        $itemLot->warehouse_id = $warehouseDestination->id;
+                        $itemLot->update();
+                        InventoryTransferItem::query()->create([
+                            'inventory_transfer_id' => $transfer->id,
+                            'item_lot_id' => $itemLot->id,
+                        ]);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Destino del traslado 04.
+     * Prioriza delivery.establishment_id (el select usa ids ficticios 1,2,3…).
+     */
+    private function resolveDispatchDestinationEstablishmentId($dispatch): ?int
+    {
+        $delivery = $dispatch->delivery;
+        if (is_array($delivery)) {
+            $delivery = (object) $delivery;
+        }
+        if (is_object($delivery) && !empty($delivery->establishment_id)) {
+            return (int) $delivery->establishment_id;
+        }
+
+        // Fallback: coincidir dirección de llegada con otro establecimiento
+        if (is_object($delivery) && !empty($delivery->address)) {
+            $byAddress = \App\Models\Tenant\Establishment::query()
+                ->where('id', '!=', $dispatch->establishment_id)
+                ->where('address', $delivery->address)
+                ->value('id');
+            if ($byAddress) {
+                return (int) $byAddress;
+            }
+        }
+
+        $deliveryId = $dispatch->delivery_address_id;
+        if (!$deliveryId) {
+            return null;
+        }
+
+        if (\App\Models\Tenant\Establishment::query()->whereKey($deliveryId)->exists()) {
+            return (int) $deliveryId;
+        }
+
+        $originAddress = \Modules\Dispatch\Models\OriginAddress::query()->find($deliveryId);
+        if ($originAddress && $originAddress->establishment_id) {
+            return (int) $originAddress->establishment_id;
+        }
+
+        return null;
+    }
+
+
+    /**
+     * Se dispara cuando se borra un document item
+     */
+    private function document_item_delete() {
+
+        DocumentItem::deleted(function(DocumentItem $document_item) {
+
+            if(!$document_item->item->is_set){
+
+                $this->processIndividualDocumentItem($document_item);
+
+            }else{
+
+                $this->voidedDocumentItemSet($document_item);
+
+            }
+
+        });
+
+    }
+
+    /**
+     * Procesa los productos fusionados (merged_products) para descontar su stock
+     * Lee los datos desde document->data_json->items
+     * Excluye el producto raíz para evitar doble descuento
+     *
+     * @param DocumentItem $document_item
+     */
+    private function processMergedProducts(DocumentItem $document_item) {
+
+        $document = $document_item->document;
+
+        // Obtener data_json del documento
+        $data_json = $document->data_json;
+        if (!$data_json || !isset($data_json->items)) {
+            return;
+        }
+
+        // Buscar el item correspondiente en data_json
+        $item_data = null;
+        foreach ($data_json->items as $item) {
+            if (isset($item->codigo_interno) && $item->codigo_interno == $document_item->item->internal_id) {
+                $item_data = $item;
+                break;
+            }
+        }
+
+        // Si no se encuentra el item o no está fusionado, salir
+        if (!$item_data || !isset($item_data->esFusionado) || !$item_data->esFusionado) {
+            return;
+        }
+
+        // Verificar que tenga productosFusionados
+        if (!isset($item_data->productosFusionados) || empty($item_data->productosFusionados)) {
+            return;
+        }
+
+        $factor = ($document->document_type_id === '07') ? 1 : -1;
+        $warehouse = ($document_item->warehouse_id)
+            ? $this->findWarehouse($this->findWarehouseById($document_item->warehouse_id)->establishment_id)
+            : $this->findWarehouse();
+
+        // Procesar cada producto fusionado
+        foreach ($item_data->productosFusionados as $merged_product) {
+
+            $merged_item_id = $merged_product->id ?? null;
+            $merged_quantity = $merged_product->quantity ?? 1;
+
+            // Si no tiene id, no podemos procesar
+            if (!$merged_item_id) {
+                \Log::warning("processMergedProducts: Producto fusionado sin ID");
+                continue;
+            }
+
+            // Saltar el producto principal para evitar doble descuento
+            if ($merged_item_id == $document_item->item_id) {
+                continue;
+            }
+
+            $total_quantity = $merged_quantity;
+
+            // Crear registro en kardex
+            $this->createInventoryKardex(
+                $document,
+                $merged_item_id,
+                ($factor * $total_quantity),
+                $warehouse->id
+            );
+
+            // Actualizar stock si corresponde
+            if (!$document->sale_note_id && !$document->order_note_id && !$document->dispatch_id && !$document->sale_notes_relateds) {
+                $this->updateStock($merged_item_id, ($factor * $total_quantity), $warehouse->id);
+            } else {
+                if ($document->dispatch) {
+                    if (!$document->dispatch->transfer_reason_type->discount_stock) {
+                        $this->updateStock($merged_item_id, ($factor * $total_quantity), $warehouse->id);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Procesa los productos fusionados (merged_products) en nota de venta
+     * Lee los datos desde sale_note_item->item (campo JSON)
+     * Excluye el producto raíz para evitar doble descuento
+     *
+     * @param SaleNoteItem $sale_note_item
+     */
+    private function processMergedProductsSaleNote(SaleNoteItem $sale_note_item) {
+
+        // Obtener item del sale_note_item (campo JSON)
+        $item_data = $sale_note_item->item;
+
+        // Si no está fusionado, salir
+        if (!isset($item_data->esFusionado) || !$item_data->esFusionado) {
+            return;
+        }
+
+        // Verificar que tenga productosFusionados
+        if (!isset($item_data->productosFusionados) || empty($item_data->productosFusionados)) {
+            return;
+        }
+
+        $sale_note = $sale_note_item->sale_note;
+        $warehouse = ($sale_note_item->warehouse_id)
+            ? $this->findWarehouse($this->findWarehouseById($sale_note_item->warehouse_id)->establishment_id)
+            : $this->findWarehouse($sale_note->establishment_id);
+
+        // Procesar cada producto fusionado
+        foreach ($item_data->productosFusionados as $merged_product) {
+
+            $merged_item_id = $merged_product->id ?? null;
+            $merged_quantity = $merged_product->quantity ?? 1;
+
+            // Si no tiene id, no podemos procesar
+            if (!$merged_item_id) {
+                continue;
+            }
+
+            // Saltar el producto principal para evitar doble descuento
+            if ($merged_item_id == $sale_note_item->item_id) {
+                continue;
+            }
+
+            $total_quantity = $merged_quantity;
+
+            // Crear registro en kardex
+            $this->createInventoryKardexSaleNote(
+                $sale_note,
+                $merged_item_id,
+                (-1 * $total_quantity),
+                $warehouse->id,
+                $sale_note_item->id
+            );
+
+            // Actualizar stock si no viene de order_note
+            if (!$sale_note->order_note_id) {
+                $this->updateStock($merged_item_id, (-1 * $total_quantity), $warehouse->id);
+            }
+        }
+    }
+
+    /**
+     * Procesa los modificadores aplicados (modifiersApplied) para descontar su stock
+     * Procesa todos los modificadores en data_json->items
+     * Solo procesa modificadores con type: "item" y item_id
+     *
+     * @param DocumentItem $document_item
+     */
+    private function processModifiersApplied(DocumentItem $document_item) {
+
+        $document = $document_item->document;
+
+        // Obtener data_json del documento
+        $data_json = $document->data_json;
+        if (!$data_json || !isset($data_json->items)) {
+            return;
+        }
+
+        // data_json->items trae los modificadores de TODO el comprobante y este
+        // evento corre por cada DocumentItem: sin este corte, un comprobante de
+        // N lineas descontaba los modificadores N veces. Se procesan una sola
+        // vez, en la primera linea del documento.
+        $isFirstItem = !DocumentItem::where('document_id', $document_item->document_id)
+            ->where('id', '<', $document_item->id)
+            ->exists();
+
+        if (!$isFirstItem) {
+            return;
+        }
+
+        $factor = ($document->document_type_id === '07') ? 1 : -1;
+        $warehouse = ($document_item->warehouse_id)
+            ? $this->findWarehouse($this->findWarehouseById($document_item->warehouse_id)->establishment_id)
+            : $this->findWarehouse();
+
+        // Procesar todos los items del data_json
+        foreach ($data_json->items as $item_data) {
+
+            // Verificar que tenga modifiersApplied
+            if (!isset($item_data->modifiersApplied) || empty($item_data->modifiersApplied)) {
+                continue;
+            }
+
+            // Procesar cada grupo de modificadores
+            foreach ($item_data->modifiersApplied as $group) {
+                if (!isset($group->items) || empty($group->items)) {
+                    continue;
+                }
+
+                // Procesar cada item del grupo
+                foreach ($group->items as $modifierItem) {
+                    // Solo procesar si es de tipo "item" y tiene item_id
+                    if (!isset($modifierItem->type) || $modifierItem->type !== 'item') {
+                        continue;
+                    }
+
+                    if (!isset($modifierItem->item_id) || !$modifierItem->item_id) {
+                        continue;
+                    }
+
+                    $modifier_item_id = $modifierItem->item_id;
+                    // Usar quantity del item_data, no del document_item
+                    $modifier_quantity = $item_data->cantidad ?? 1;
+
+                    // Crear registro en kardex
+                    $this->createInventoryKardex(
+                        $document,
+                        $modifier_item_id,
+                        ($factor * $modifier_quantity),
+                        $warehouse->id
+                    );
+
+                    // Actualizar stock si corresponde
+                    if (!$document->sale_note_id && !$document->order_note_id && !$document->dispatch_id && !$document->sale_notes_relateds) {
+                        $this->updateStock($modifier_item_id, ($factor * $modifier_quantity), $warehouse->id);
+                    } else {
+                        if ($document->dispatch) {
+                            if (!$document->dispatch->transfer_reason_type->discount_stock) {
+                                $this->updateStock($modifier_item_id, ($factor * $modifier_quantity), $warehouse->id);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Procesa los modificadores aplicados (modifiersApplied) en nota de venta
+     * Lee los datos desde sale_note_item->item (campo JSON)
+     * Solo procesa modificadores con type: "item" y item_id
+     *
+     * @param SaleNoteItem $sale_note_item
+     */
+    private function processModifiersAppliedSaleNote(SaleNoteItem $sale_note_item) {
+
+        // Obtener item del sale_note_item (campo JSON)
+        $item_data = $sale_note_item->item;
+
+        // Verificar que tenga modifiersApplied
+        if (!isset($item_data->modifiersApplied) || empty($item_data->modifiersApplied)) {
+            return;
+        }
+
+        $sale_note = $sale_note_item->sale_note;
+        $warehouse = ($sale_note_item->warehouse_id)
+            ? $this->findWarehouse($this->findWarehouseById($sale_note_item->warehouse_id)->establishment_id)
+            : $this->findWarehouse($sale_note->establishment_id);
+
+        // Procesar cada grupo de modificadores
+        foreach ($item_data->modifiersApplied as $group) {
+            if (!isset($group->items) || empty($group->items)) {
+                continue;
+            }
+
+            // Procesar cada item del grupo
+            foreach ($group->items as $modifierItem) {
+                // Solo procesar si es de tipo "item" y tiene item_id
+                if (!isset($modifierItem->type) || $modifierItem->type !== 'item') {
+                    continue;
+                }
+
+                if (!isset($modifierItem->item_id) || !$modifierItem->item_id) {
+                    continue;
+                }
+
+                $modifier_item_id = $modifierItem->item_id;
+                $modifier_quantity = $sale_note_item->quantity; // Cantidad del producto principal
+
+                // Crear registro en kardex
+                $this->createInventoryKardexSaleNote(
+                    $sale_note,
+                    $modifier_item_id,
+                    (-1 * $modifier_quantity),
+                    $warehouse->id,
+                    $sale_note_item->id
+                );
+
+                // Actualizar stock si no viene de order_note
+                if (!$sale_note->order_note_id) {
+                    $this->updateStock($modifier_item_id, (-1 * $modifier_quantity), $warehouse->id);
+                }
+            }
+        }
+    }
+}

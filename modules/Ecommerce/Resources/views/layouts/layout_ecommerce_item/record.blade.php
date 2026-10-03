@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<!-- Mirrored from portotheme.com/html/porto_ecommerce/demo-6/product.html by HTTrack Website Copier/3.x [XR&CO'2014], Sat, 07 Sep 2019 03:39:58 GMT -->
+
+<head>
+    @php($pageCompany = $company ?? $vc_company ?? null)
+    @php($product = $record ?? null)
+    @php($pageTitle = data_get($pageCompany, 'title_web') ?: data_get($pageCompany, 'trade_name'))
+    @php($productName = data_get($product, 'description') ?: 'Producto')
+    @php($productDescription = data_get($product, 'name') ?: ($ecommerceDescription) ?: 'Descripción no disponible')
+    @php($productImage = data_get($product, 'image') ? asset('storage/uploads/items/'.data_get($product, 'image')) : asset('logo/tulogo.png'))
+    @php($productPrice = number_format(data_get($product, 'sale_unit_price', 0), 2, '.', ''))
+    @php($productCurrency = data_get($product, 'currency_type_symbol', 'S/'))
+    @php($productUrl = url()->current())
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+
+    <title>{{ $pageTitle ? ($productName ? $pageTitle.' - '.$productName : $pageTitle) : ($productName ?: 'Ecommerce') }}</title>
+    <meta name="csrf-token" content="{{ csrf_token() }}">
+    <meta name="keywords" content="eCommerce, {{ $pageTitle }}, {{ $productName }}" />
+    <meta name="description" content="{{ strip_tags($productDescription) }}" />
+    <meta name="author" content="SW-THEMES">
+
+    <!-- Open Graph Meta Tags -->
+    <meta property="og:title" content="{{ $productName }}" />
+    <meta property="og:description" content="{{ strip_tags($productDescription) }}" />
+    <meta property="og:type" content="product" />
+    <meta property="og:url" content="{{ $productUrl }}" />
+    <meta property="og:image" content="{{ $productImage }}" />
+    <meta property="og:site_name" content="{{ $pageTitle }}" />
+    <meta property="product:price:amount" content="{{ $productPrice }}" />
+    <meta property="product:price:currency" content="{{ $productCurrency }}" />
+
+    <!-- Twitter Card Meta Tags -->
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="{{ $productName }}" />
+    <meta name="twitter:description" content="{{ strip_tags($productDescription) }}" />
+    <meta name="twitter:image" content="{{ $productImage }}" />
+
+    <!-- Schema.org JSON-LD (Product) -->
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "Product",
+        "name": "{{ addslashes($productName) }}",
+        "image": "{{ $productImage }}",
+        "description": "{{ addslashes(strip_tags($productDescription)) }}",
+        "sku": "{{ data_get($product, 'internal_id') }}",
+        "brand": {
+            "@type": "Brand",
+            "name": "{{ data_get($product, 'brand.name') ?: $pageTitle }}"
+        },
+        "offers": {
+            "@type": "Offer",
+            "url": "{{ $productUrl }}",
+            "priceCurrency": "{{ $productCurrency }}",
+            "price": "{{ $productPrice }}",
+            "availability": "{{ data_get($product, 'stock', 0) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock' }}"
+        }
+    }
+    </script>
+
+    <!-- Favicon -->
+    <link rel="icon" type="image/x-icon" href="{{ asset('porto-ecommerce/assets/images/icons/favicon.svg') }}">
+
+    <!-- Plugins CSS File -->
+    <link rel="stylesheet" href="{{ asset('porto-ecommerce/assets/css/bootstrap.min.css') }}">
+
+    <!-- Main CSS File -->
+    <link rel="stylesheet" href="{{ asset('porto-ecommerce/assets/css/style.min.css') }}">
+    <link rel="stylesheet" href="{{ asset('porto-ecommerce/assets/css/custom.css') }}">
+
+    <link rel="stylesheet" href="{{ asset('porto-ecommerce/assets/css/rating.css') }}">
+
+    <!-- Fontawesome -->
+    <link rel="stylesheet" href="{{ asset('porto-ecommerce/assets/font-awesome/css/fontawesome-all.min.css') }}">
+
+    <!-- Estilos personalizados -->
+    @php($storeCssPath = public_path('porto-light/css/styles_ecommerce.css'))
+    <link rel="stylesheet" href="{{ asset('porto-light/css/styles_ecommerce.css') }}?v={{ is_file($storeCssPath) ? filemtime($storeCssPath) : 1 }}" />
+    @php($pdpPanelCssPath = public_path('porto-light/css/product-panel.css'))
+    <link rel="stylesheet" href="{{ asset('porto-light/css/product-panel.css') }}?v={{ is_file($pdpPanelCssPath) ? filemtime($pdpPanelCssPath) : 1 }}" />
+    @php($pdpCssPath = public_path('porto-light/css/product-detail.css'))
+    <link rel="stylesheet" href="{{ asset('porto-light/css/product-detail.css') }}?v={{ is_file($pdpCssPath) ? filemtime($pdpCssPath) : 1 }}" />
+    @include('ecommerce::layouts.partials_ecommerce.primary_color_style')
+</head>
+
+<body>
+    @include('ecommerce::layouts.partials_ecommerce.announcement_bar')
+    <div class="page-wrapper">
+
+        @include('ecommerce::layouts.partials_ecommerce.header')
+        @include('ecommerce::layouts.partials_ecommerce.header_bottom_sticky')
+
+
+
+        <main class="main">
+            @php($breadcrumbCategory = data_get($record ?? null, 'category'))
+            <nav aria-label="breadcrumb" class="breadcrumb-nav pdp-breadcrumb-nav">
+                <div class="container">
+                    <ol class="breadcrumb">
+                        <li class="breadcrumb-item">
+                            <a href="{{ route('tenant.ecommerce.index') }}">Inicio</a>
+                        </li>
+                        @if($breadcrumbCategory && data_get($breadcrumbCategory, 'name'))
+                            <li class="breadcrumb-item">
+                                <a href="{{ route('tenant.ecommerce.category', \Illuminate\Support\Str::slug(data_get($breadcrumbCategory, 'name'), '-')) }}">
+                                    {{ data_get($breadcrumbCategory, 'name') }}
+                                </a>
+                            </li>
+                        @endif
+                        <li class="breadcrumb-item active" aria-current="page">{{ $productName }}</li>
+                    </ol>
+                </div><!-- End .container -->
+            </nav>
+            <div class="container">
+                <div class="row">
+                    <div class="col-12">
+
+                        @yield('content')
+
+                    </div><!-- End .col-12 -->
+                </div><!-- End .row -->
+            </div><!-- End .container -->
+
+            @php($currentItemId = data_get($record ?? null, 'id'))
+            @php($currentCategoryId = data_get($record ?? null, 'category.id') ?? data_get($record ?? null, 'category_id'))
+            @php($hasRelatedItems = $currentCategoryId && collect($items ?? [])->contains(fn($item) => data_get($item, 'category_id') == $currentCategoryId && data_get($item, 'id') != $currentItemId))
+            @if($hasRelatedItems)
+            <div class="featured-section">
+                @include('ecommerce::layouts.partials_ecommerce.featured_products_bottom' )
+            </div><!-- End .featured-section -->
+            @endif
+        </main><!-- End .main -->
+
+        <footer class="footer">
+            @include('ecommerce::layouts.partials_ecommerce.footer')
+        </footer><!-- End .footer -->
+    </div><!-- End .page-wrapper -->
+
+    <div class="mobile-menu-overlay"></div><!-- End .mobil-menu-overlay -->
+
+    <div class="mobile-menu-container">
+        @include('ecommerce::layouts.partials_ecommerce.mobile_menu')
+    </div><!-- End .mobile-menu-container -->
+
+
+
+    <a id="scroll-top" href="#top" title="Top" role="button"><i class="icon-angle-up"></i></a>
+
+    <!-- Plugins JS File -->
+    <script src="{{ asset('porto-ecommerce/assets/js/jquery.min.js') }}"></script>
+    <script src="{{ asset('porto-ecommerce/assets/js/bootstrap.bundle.min.js') }}"></script>
+    <script src="{{ asset( 'porto-ecommerce/assets/js/plugins.min.js') }}"></script>
+
+    <!-- Main JS File -->
+    <script src="{{ asset('porto-ecommerce/assets/js/main.js') }}"></script>
+    <script src="{{ asset('porto-ecommerce/assets/js/vue.min.js') }}"></script>
+    <script src="{{ asset('porto-ecommerce/assets/js/rating.js') }}"></script>
+
+    @stack('scripts')
+
+    <!-- www.addthis.com share plugin -->
+    <!--<script src="../../../../s7.addthis.com/js/300/addthis_widget.js#pubid=ra-5b927288a03dbde6"></script> -->
+</body>
+
+<!-- Mirrored from portotheme.com/html/porto_ecommerce/demo-6/product.html by HTTrack Website Copier/3.x [XR&CO'2014], Sat, 07 Sep 2019 03:40:02 GMT -->
+
+</html>

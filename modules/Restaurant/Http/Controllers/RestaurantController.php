@@ -1,0 +1,657 @@
+<?php
+
+namespace Modules\Restaurant\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Routing\Controller;
+use App\Models\Tenant\Item;
+use Modules\Item\Models\Category;
+use Modules\Inventory\Models\InventoryConfiguration;
+use Modules\Restaurant\Http\Resources\ItemCollection;
+use App\Models\Tenant\Promotion;
+use App\Http\Controllers\Tenant\Api\ServiceController;
+use App\Models\Tenant\ConfigurationEcommerce;
+use App\Models\Tenant\Order;
+use Exception;
+use Illuminate\Support\Facades\Validator;
+use stdClass;
+use Illuminate\Support\Str;
+use App\Http\Controllers\Tenant\EmailController;
+use App\Mail\Tenant\CulqiEmail;
+use Modules\Restaurant\Models\RestaurantConfiguration;
+use Modules\Restaurant\Models\RestaurantNote;
+use Modules\Restaurant\Models\RestaurantTable;
+use Modules\Restaurant\Models\RestaurantItemOrderStatus;
+use Modules\Restaurant\Models\RestaurantStockProduct;
+use Modules\Restaurant\Services\RestaurantStockService;
+use Illuminate\Support\Facades\DB;
+use Modules\ApiPeruDev\Data\ServiceData;
+use App\Models\Tenant\Person;
+use App\Models\Tenant\Configuration;
+use App\Models\Tenant\Company;
+use Modules\BusinessTurn\Models\BusinessTurn;
+use Modules\MobileApp\Models\AppConfiguration;
+use App\Services\System\MozoConfigurationService;
+use App\Services\System\VendeyaConfigurationService;
+use App\Helpers\MozoAccessHelper;
+use App\Models\Tenant\User;
+
+
+class RestaurantController extends Controller
+{
+    /**
+     * Vista publica de mozo
+     */
+    public function public()
+    {
+        return view('restaurant::mozo.index');
+    }
+
+    public function mozoEntrar(string $hash)
+    {
+        $helper = new MozoAccessHelper();
+        $user = $helper->findUserByHash($hash);
+
+        if (!$user) {
+            abort(401, 'Enlace inválido o expirado.');
+        }
+
+        return view('restaurant::mozo.entrar', [
+            'sessionData' => $this->buildMozoSessionData($user, 'MOZO'),
+        ]);
+    }
+
+    public function mozoDirecto()
+    {
+        return view('restaurant::mozo.entrar', [
+            'sessionData' => $this->buildMozoSessionData(auth()->user(), 'ADM'),
+        ]);
+    }
+
+    private function buildMozoSessionData(User $user, string $defaultRole = 'ADM'): array
+    {
+        if (!$user->api_token) {
+            $user->api_token = Str::random(50);
+            $user->save();
+        }
+
+        $user->loadMissing('restaurant_role');
+
+        return [
+            'token' => $user->api_token,
+            'email' => $user->email,
+            'name' => $user->name,
+            'userRole' => optional($user->restaurant_role)->code ?? $defaultRole,
+            'establishmentId' => (string) ($user->establishment_id ?? ''),
+            'sellerId' => (string) $user->id,
+            'sellerName' => $user->name,
+        ];
+    }
+
+    public function config(MozoConfigurationService $service)
+    {
+        return $this->buildConfigResponse($service->get());
+    }
+
+    /**
+     * Vista publica de vendeya
+     */
+    public function publicVendeya()
+    {
+        return view('restaurant::vendeya.index');
+    }
+
+    public function configVendeya(VendeyaConfigurationService $service)
+    {
+        return $this->buildConfigResponse($service->get());
+    }
+
+    /**
+     * Construye la respuesta JSON de configuración de las apps (mozo, vendeya),
+     * combinando los datos dinámicos del tenant con el branding propio de cada app.
+     */
+    private function buildConfigResponse(array $branding)
+    {
+        try {
+            $currentHostname = app(\Hyn\Tenancy\Contracts\CurrentHostname::class)?->fqdn;
+            $fqdn = $currentHostname ?: request()->getHost();
+            $protocol = config('tenant.force_https') ? 'https://' : 'http://';
+
+            // WebSocket público (Centrifugo) para las apps mozo/vendeya.
+            // Es un ÚNICO subdominio ws.{dominio-base} por instalación, compartido
+            // por todos los tenants (el canal restaurant:{fqdn} diferencia a cada uno).
+            // Se deriva del fqdn del tenant quitando el label del subdominio:
+            //   1.facturaloperu-pro8.oo  ->  wss://ws.facturaloperu-pro8.oo
+            // OJO: esto NO es CENTRIFUGO_URL del .env (esa es la ruta INTERNA
+            // Laravel->Centrifugo para publicar vía HTTP API dentro de docker).
+            $firstDot = strpos($fqdn, '.');
+            $baseDomain = $firstDot !== false ? substr($fqdn, $firstDot + 1) : $fqdn;
+            $wsScheme = config('tenant.force_https') ? 'wss' : 'ws';
+            $wsUrl = "{$wsScheme}://ws.{$baseDomain}";
+            // $wsUrl = "ws://localhost:8000"; // temporal para desarrollo local, reemplazar por la línea anterior en producción
+
+            return response()->json(array_merge([
+                'apiSsl' => $protocol,
+                'apiUrl' => $fqdn,
+                'wsUrl' => $wsUrl,
+                'isStoreEnabled' => 'false',
+            ], $branding))->header('Cache-Control', 'no-store, no-cache, must-revalidate');
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Error al obtener configuración: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    public function initialData()
+    {
+        $company = Company::active();
+        $configuration = Configuration::first();
+        $business_turn_tap = BusinessTurn::where('value','tap')->first();
+        $user = auth()->user();
+
+        return [
+            'success' => true,
+            'name' => $user->name,
+            'email' => $user->email,
+            'establishment_id' => $user->establishment->id,
+            'seriedefault' => $user->series_id,
+            'token' => $user->api_token,
+            'restaurant_role_id' => $user->restaurant_role_id,
+            'restaurant_role_code' => $user->restaurant_role_id ? $user->restaurant_role->code : null,
+            'ruc' => $company->number,
+            'app_logo' => $company->logo,
+            'app_logo_base64' => '',
+            'company' => [
+                'name' => $company->name,
+                'address' => $user->establishment->department->description.', '.$user->establishment->province->description.', '.$user->establishment->district->description.', '.$user->establishment->address,
+                'phone' => $user->establishment->telephone,
+                'email' => $user->establishment->email,
+                'enable_list_product' => !$configuration->enable_list_product,
+                'qr_api_enable_ws' => $configuration->qr_api_enable,
+                'qr_api_url_ws' => $configuration->qr_api_url,
+                'qr_api_key_ws' => $configuration->qr_api_apiKey,
+                'url_logo' => ($company->logo)?asset('storage/uploads/logos/'.$company->logo):'',
+                'logo_base64' => $company->logo ? 'data:image/png;base64,' . base64_encode(file_get_contents(public_path('storage/uploads/logos/' . $company->logo))) : '',
+                'is_business_turn_tap' => ($business_turn_tap)?$business_turn_tap->active:0,
+            ],
+            'app_configuration' => optional(AppConfiguration::first())->getRowResource(),
+            'permission_edit_item_prices' => $user->permission_edit_item_prices,
+            'sellerId' => $user->id,
+        ];
+    }
+
+    /**
+     * Descripción general reutilizable para meta tags y otros lugares
+     */
+    public static function getRestaurantDescription($company = null)
+    {
+        // Buscar el nombre comercial en varios campos posibles
+        $trade_name = data_get($company, 'trade_name')
+            ?: 'Tu Restaurante';
+        return "Disfruta lo mejor de la gastronomía en {$trade_name}. Descubre una amplia variedad de platos deliciosos, ingredientes de calidad y atención excepcional, con pedidos fáciles y servicio rápido y confiable.";
+    }
+
+    public function __construct(){
+
+        // Compartir descripción restaurante globalmente usando el modelo Company
+        $companyModel = \App\Models\Tenant\Company::first();
+        $restaurantDescription = self::getRestaurantDescription($companyModel);
+        view()->share('restaurantDescription', $restaurantDescription);
+    }
+
+    public function menu($name = null)
+    {
+        if($name) {
+            $name = str_replace('-', ' ', $name);
+        }
+
+        $category = Category::where('name', $name)->first();
+
+        // Obtener preferencias de configuración
+        $configEcommerce = ConfigurationEcommerce::first();
+        $preferences = $configEcommerce && $configEcommerce->preferences
+            ? (is_string($configEcommerce->preferences) ? json_decode($configEcommerce->preferences, true) : $configEcommerce->preferences)
+            : ['show_description' => 1, 'show_stock' => 0, 'only_available_products' => 0];
+
+        // Obtener el modelo Company para meta tags y descripción
+        $company = \App\Models\Tenant\Company::first();
+
+        // Query base
+        $query = Item::where([['apply_restaurant', 1], ['internal_id','!=', null]]);
+
+        // Filtrar solo productos disponibles si está activado
+        if (isset($preferences['only_available_products']) && $preferences['only_available_products'] == 1) {
+            $query->where('stock', '>', 0);
+        }
+
+        $dataPaginate = $query->category($category ? $category->id : null)
+                              ->paginate(12);
+
+        $configuration = InventoryConfiguration::first();
+        $categories = Category::get();
+
+        // Obtener spots publicitarios
+        $spots = Promotion::where('apply_restaurant', 1)
+            ->where('type', 'spots')
+            ->get();
+
+        // Obtener la descripción general para meta tags
+        $restaurantDescription = self::getRestaurantDescription($company);
+
+        return view('restaurant::index', [
+            'dataPaginate' => $dataPaginate,
+            'configuration' => $configuration->stock_control,
+            'spots' => $spots,
+            'preferences' => $preferences,
+            'restaurantDescription' => $restaurantDescription,
+            'company' => $company
+        ])->with('categories', $categories);
+    }
+
+    /*
+     * vista privada
+     */
+    public function list_items()
+    {
+        return view('restaurant::items.index');
+    }
+
+    public function is_visible(Request $request)
+    {
+        $item = Item::find($request->id);
+
+        if(!$item->internal_id && $request->apply_restaurant){
+            return [
+                'success' => false,
+                'message' =>'Para habilitar la visibilidad, debe asignar un codigo interno al producto',
+            ];
+        }
+
+        $visible = $request->apply_restaurant == true ? 1 : 0 ;
+        $item->apply_restaurant = $visible;
+        $item->save();
+
+        return [
+            'success' => true,
+            'message' => ($visible > 0 )?'El Producto ya es visible en restaurante' : 'El Producto ya no es visible en restaurante',
+            'id' => $request->id
+        ];
+
+    }
+
+    public function items(Request $request){
+
+        $warehouse_id = auth()->user()->establishment->id;
+
+        $configuration = Configuration::first();
+        $enable_list_product = (bool) optional($configuration)->enable_list_product;
+
+        // Agrupar variantes es opt-in (?group_variations=1): el cliente que aun no
+        // implementa el modal sigue recibiendo cada variacion como producto suelto.
+        $group_variations = $request->group_variations == 1;
+
+        $itemsQuery = Item::where('apply_restaurant', 1)
+            ->whereNotNull('internal_id')
+            ->where(function($query) use ($warehouse_id) {
+                $query->whereHas('warehouses', function ($q) use ($warehouse_id) {
+                    $q->where('warehouse_id', $warehouse_id);
+                })->orWhereHas('restaurantSupplies');
+            })
+            ->with(['restaurantSupplies'])
+            // Valores de variacion de la propia fila (Talla M, Rojo...): sin esto
+            // variation_label y variation_attributes salen vacios.
+            ->with('variationValues.value.variable');
+
+        if ($group_variations) {
+            // El padre pasa a ser la tarjeta y sus hijas viajan dentro, con la
+            // misma forma de fila para que la elegida se use como cualquier producto.
+            // Sin este eager loading el resource no toca la relacion (evita N+1) y
+            // variation_variables/variations salen vacios.
+            $itemsQuery->whereNull('parent_item_id')
+                ->withCount('variations')
+                ->with(['variations' => function ($query) use ($enable_list_product) {
+                    $query->whereIsActive()
+                        ->with([
+                            'restaurantSupplies',
+                            'variationValues.value.variable',
+                        ])
+                        ->orderBy('id');
+
+                    if ($enable_list_product) {
+                        $query->with('item_unit_types.prices.priceLabel');
+                    }
+                }]);
+        }
+
+        if ($enable_list_product) {
+            $itemsQuery->with('item_unit_types.prices.priceLabel');
+        }
+
+        $items = $itemsQuery->get();
+
+        // El stock del almacen en una sola consulta, no una por producto. Las
+        // variaciones entran al mismo precargado: su stock es el que decide el modal.
+        $stock_targets = $group_variations
+            ? $items->concat($items->pluck('variations')->filter()->flatten())
+            : $items;
+
+        Item::preloadStockByWarehouse($stock_targets);
+
+        $records = (new ItemCollection($items))->withConfiguration($configuration);
+
+        return [
+            'success' => true,
+            'data' => $records
+        ];
+    }
+
+    public function setRestaurantFavoriteItem(Request $request) {
+        $item = Item::findOrFail($request->id);
+
+        $item->restaurant_favorite = ($item->restaurant_favorite == 1) ? 0 : 1;
+        $item->save();
+
+        return [
+            'success' => true,
+            'message' => ($item->restaurant_favorite == 1)? "Producto agregado a favoritos": "Producto quitado de favoritos"
+        ];
+    }
+
+    public function categories(Request $request){
+        $records = Category::all();
+        return [
+            'success' => true,
+            'data' => $records
+        ];
+    }
+
+    public function partialItem($id)
+    {
+        $record = Item::find($id);
+        return view('restaurant::items.partial', compact('record'));
+    }
+
+
+    public function item(Request $request, $id, $slug = null)
+    {
+        $id = (int) $id;
+        $row = Item::find($id);
+
+        if (!$row) {
+            abort(404);
+        }
+
+        $promotion_id = $request->query('promotion');
+
+        $canonical_slug = Str::slug($row->description);
+
+        if ($canonical_slug !== '' && $slug !== $canonical_slug) {
+            $params = ['id' => $id, 'slug' => $canonical_slug];
+            if ($promotion_id) {
+                $params['promotion'] = $promotion_id;
+            }
+            return redirect()->route('restaurant.item', $params, 301);
+        }
+
+        $exchange_rate_sale = $this->getExchangeRateSale();
+        $sale_unit_price = ($row->has_igv) ? $row->sale_unit_price : $row->sale_unit_price*1.18;
+
+        $description = $promotion_id ? $this->getDescriptionWithPromotion($row, $promotion_id) : $row->description;
+
+        $record = (object)[
+            'id' => $row->id,
+            'internal_id' => $row->internal_id,
+            'unit_type_id' => $row->unit_type_id,
+            'description' => $description,
+            'category' => $row->category,
+            'stock' => $row->stock,
+            // 'description' => $row->description,
+            'technical_specifications' => $row->technical_specifications,
+            'name' => $row->name,
+            'second_name' => $row->second_name,
+            'sale_unit_price' => ($row->currency_type_id === 'PEN') ? $sale_unit_price : ($sale_unit_price * $exchange_rate_sale),
+            'currency_type' => $row->currency_type,
+            'has_igv' => (bool) $row->has_igv,
+            'sale_unit' => $row->sale_unit_price,
+            'sale_affectation_igv_type_id' => $row->sale_affectation_igv_type_id,
+            'currency_type_symbol' => $row->currency_type->symbol,
+            'image' =>  $row->image,
+            'image_medium' => $row->image_medium,
+            'image_small' => $row->image_small,
+            'tags' => $row->tags->pluck('tag_id')->toArray(),
+            'images' => $row->images,
+            'attributes' => $row->attributes ? $row->attributes : [],
+            'promotion_id' => $promotion_id,
+        ];
+
+        return view('restaurant::items.record', compact('record'));
+    }
+
+
+    private function getExchangeRateSale(){
+        $exchange_rate = app(ServiceController::class)->exchangeRateTest(date('Y-m-d'));
+        return (array_key_exists('sale', $exchange_rate)) ? $exchange_rate['sale'] : 1;
+    }
+
+    public function getDescriptionWithPromotion($item, $promotion_id)
+    {
+        $promotion = Promotion::findOrFail($promotion_id);
+        return "{$item->description} - {$promotion->name}";
+    }
+
+    public function detailCart()
+    {
+        $configuration = ConfigurationEcommerce::first();
+
+        $history_records = [];
+        if (auth('ecommerce')->user()) {
+            $email_user = auth('ecommerce')->user()->email;
+            $history_records = Order::where('apply_restaurant', 1)->where('customer', 'LIKE', '%'.$email_user.'%')
+                    ->get()
+                    ->transform(function($row) {
+                        /** @var  Order $row */
+                        return $row->getCollectionData();
+                    })->toArray();
+        }
+        return view('restaurant::cart.detail', compact(['configuration','history_records']));
+    }
+
+    public function paymentCash(Request $request)
+    {
+        $validator = Validator::make($request->customer, [
+            'telefono' => 'required|numeric',
+            'direccion' => 'required',
+            'codigo_tipo_documento_identidad' => 'required|numeric',
+            'numero_documento' => 'required|numeric',
+            'identity_document_type_id' => 'required|numeric'
+        ]);
+
+        if ($validator->fails()) {
+            return response()->json($validator->errors(), 422);
+        } else {
+            try {
+
+                $type = ($request->purchase["datos_del_cliente_o_receptor"]["codigo_tipo_documento_identidad"]=='6')?'ruc':'dni';
+                $document_number = $request->purchase["datos_del_cliente_o_receptor"]["numero_documento"];
+
+                $dataDocument = $this->searchDocument($type,$document_number);
+                if ($dataDocument["success"]) {
+                    $clientData = [ "apellidos_y_nombres_o_razon_social" => $dataDocument["data"]["name"] ];
+                    if ($type === 'ruc') {
+                        $clientData["direccion"] = $dataDocument['data']['address'];
+                        $clientData["ubigeo"] = $dataDocument['data']['location_id'][2] ?? null;
+                    }
+                    $request->merge([
+                        'purchase' => array_merge($request->purchase, [
+                            "datos_del_cliente_o_receptor" => array_merge(
+                                $request->purchase["datos_del_cliente_o_receptor"],
+                                $clientData
+                            )
+                        ])
+                    ]);
+                }
+
+                $user = auth('ecommerce')->user();
+                $order = Order::create([
+                    'external_id' => Str::uuid()->toString(),
+                    'customer' =>  $request->customer,
+                    'shipping_address' => 'direccion 1',
+                    'items' =>  $request->items,
+                    'total' => $request->precio_culqi,
+                    'reference_payment' => 'efectivo',
+                    'status_order_id' => 1,
+                    'purchase' => $request->purchase,
+                    'apply_restaurant' => 1
+                ]);
+
+                $customer_email = $user->email;
+                $document = new stdClass;
+                $document->client = $user->name;
+                $document->product = $request->producto;
+                $document->total = $request->precio_culqi;
+                $document->items = $request->items;
+
+                $this->paymentCashEmail($customer_email, $document);
+
+                //Mail::to($customer_email)->send(new CulqiEmail($document));
+                return [
+                    'success' => true,
+                    'order' => $order
+                ];
+
+        }catch(Exception $e)
+        {
+            return [
+                'success' => false,
+                'message' =>  $e->getMessage()
+            ];
+        }
+      }
+    }
+
+    public function paymentCashEmail($customer_email, $document)
+    {
+        try {
+            $email = $customer_email;
+            $mailable = new CulqiEmail($document);
+            $id = (int) $document->id;
+            $model = __FILE__.";;".__LINE__;
+            $sendIt = EmailController::SendMail($email, $mailable, $id, $model);
+        }catch(\Exception $e)
+        {
+            return true;
+        }
+    }
+
+    public function savePrice(Request $request) {
+        $item = Item::find($request->id);
+        $item->sale_unit_price = $request->sale_unit_price;
+        $item->save();
+
+        return [
+            'success' => true,
+            'message' => 'Precio editado correctamente.'
+        ];
+    }
+
+    public function searchDocument($type, $number)
+    {
+        return (new ServiceData)->service($type, $number);
+    }
+
+    // Cambiar mesa de un pedido a otra mesa
+    public function changeTablePedido(Request $request)
+    {
+        try {
+            $request->validate([
+                'tableid_origin' => 'required|integer|different:tableid_destination',
+                'tableid_destination' => 'required|integer'
+            ]);
+
+            $tableid_origin = $request->tableid_origin;
+            $tableid_destination = $request->tableid_destination;
+
+            $defaultTableValues = [
+                'status' => 'available',
+                'products' => [],
+                'total' => 0.0,
+                'personas' => 0,
+                'cliente' => null,
+                'comentarios' => null,
+                'waiter' => null,
+                'opening_date' => null,
+                'order_status' => 'pending'
+            ];
+
+            $table_origin = RestaurantTable::find($tableid_origin);
+            if (!$table_origin) {
+                return ['success' => false, 'message' => 'La mesa de origen no existe.'];
+            }
+
+            $table_destination = RestaurantTable::find($tableid_destination);
+            if (!$table_destination) {
+                return ['success' => false, 'message' => 'La mesa destino no existe.'];
+            }
+
+            DB::connection('tenant')->transaction(function() use ($table_origin, $table_destination, $defaultTableValues, $tableid_origin, $tableid_destination) {
+
+                $table_destination->update([
+                    'status' => $table_origin->status,
+                    'products' => $table_origin->products,
+                    'total' => $table_origin->total,
+                    'personas' => $table_origin->personas,
+                    'cliente' => $table_origin->cliente,
+                    'comentarios' => $table_origin->comentarios,
+                    'waiter' => $table_origin->waiter,
+                    'opening_date' => $table_origin->opening_date,
+                    'order_status' => $table_origin->order_status
+                ]);
+
+                RestaurantItemOrderStatus::where('table_id', $tableid_origin)
+                    ->update(['table_id' => $tableid_destination]);
+
+                $table_origin->update($defaultTableValues);
+
+            });
+
+            return ['success' => true, 'message' => 'Los datos de la mesa se han movido correctamente.'];
+
+        } catch(\Exception $e) {
+            return ['success' => false, 'message' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Obtiene el stock disponible de todos los items del restaurante
+     * Versión optimizada para consultas frecuentes (websockets)
+     * Solo retorna: item_id, stock, quantity_reserved, available
+     *
+     * @return array
+     */
+    public function getStockStatus()
+    {
+        try {
+            $stockData = RestaurantStockProduct::select(
+                'item_id',
+                'stock',
+                'quantity_reserved',
+                DB::raw('GREATEST(0, stock - quantity_reserved) as available')
+            )->get();
+
+            return [
+                'success' => true,
+                'data' => $stockData
+            ];
+
+        } catch (\Exception $e) {
+            return [
+                'success' => false,
+                'message' => 'Error al obtener el stock: ' . $e->getMessage()
+            ];
+        }
+    }
+
+}

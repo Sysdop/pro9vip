@@ -1,0 +1,1335 @@
+<?php
+
+namespace App\Http\Controllers\Tenant;
+
+use App\CoreFacturalo\Helpers\Storage\StorageDocument;
+use App\CoreFacturalo\Requests\Inputs\Common\EstablishmentInput;
+use App\CoreFacturalo\Requests\Inputs\Common\PersonInput;
+use App\CoreFacturalo\Template;
+use App\Http\Controllers\Controller;
+use App\Http\Controllers\SearchItemController;
+use App\Http\Requests\Tenant\QuotationRequest;
+use App\Http\Resources\Tenant\QuotationCollection;
+use App\Http\Resources\Tenant\QuotationResource;
+use App\Mail\Tenant\QuotationEmail;
+use App\Models\Tenant\Catalogs\AffectationIgvType;
+use App\Models\Tenant\Catalogs\AttributeType;
+use App\Models\Tenant\Catalogs\ChargeDiscountType;
+use App\Models\Tenant\Catalogs\CurrencyType;
+use App\Models\Tenant\Catalogs\DocumentType;
+use App\Models\Tenant\Catalogs\OperationType;
+use App\Models\Tenant\Catalogs\PriceType;
+use App\Models\Tenant\Catalogs\SystemIscType;
+use App\Models\Tenant\Company;
+use App\Models\Tenant\Configuration;
+use App\Models\Tenant\Establishment;
+use App\Models\Tenant\Item;
+use App\Models\Tenant\PaymentMethodType;
+use App\Models\Tenant\Person;
+use App\Models\Tenant\Quotation;
+use App\Models\Tenant\Series;
+use App\Services\SeriesResolver;
+use App\Models\Tenant\StateType;
+use App\Models\Tenant\User;
+use App\Models\Tenant\Warehouse;
+use App\Traits\OfflineTrait;
+use Exception;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Str;
+use Modules\Finance\Traits\FinanceTrait;
+use Mpdf\Config\ConfigVariables;
+use Mpdf\Config\FontVariables;
+use Mpdf\HTMLParserMode;
+use Mpdf\Mpdf;
+use Modules\Inventory\Models\Warehouse as ModuleWarehouse;
+
+
+class QuotationController extends Controller
+{
+
+    use FinanceTrait;
+    use OfflineTrait;
+    use StorageDocument;
+
+    protected $quotation;
+    protected $company;
+
+    public function index()
+    {
+        $company = Company::select('soap_type_id')->first();
+        $soap_company = $company->soap_type_id;
+        $generate_order_note_from_quotation = Configuration::getRecordIndividualColumn('generate_order_note_from_quotation');
+
+        return view('tenant.quotations.index', compact('soap_company', 'generate_order_note_from_quotation'));
+    }
+
+
+    public function create($id = null, $type = null)
+    {
+        $resourceId = null;
+        $saleOpportunityId = null;
+
+        if ($id && is_numeric($id)) {
+            if ($type === 'sale_opportunity') {
+                $saleOpportunityId = (int) $id;
+            } else {
+                // Siempre asignar el id de edición; el endpoint record valida existencia.
+                // (Antes Quotation::find podía dejar resourceId null y el form abría vacío como "nueva".)
+                $resourceId = (int) $id;
+            }
+        }
+
+        return view('tenant.quotations.form', compact('saleOpportunityId', 'resourceId'));
+    }
+
+    public function edit($id)
+    {
+        $resourceId = $id;
+        return view('tenant.quotations.form_edit', compact('resourceId'));
+    }
+
+    public function columns()
+    {
+        return [
+            'customer' => 'Cliente',
+            'date_of_issue' => 'Fecha de emisión',
+            'delivery_date' => 'Fecha de entrega',
+            'user_name' => 'Registrado por',
+            'seller_name' => 'Vendedor',
+            'referential_information' => 'Inf.Referencial',
+            'number' => 'Número',
+            'observations' => 'Observaciones',
+        ];
+    }
+
+    public function filter()
+    {
+        // Mismos estados editables/filtrables que oportunidades de venta (patrón del sistema)
+        $state_types = StateType::whereIn('id', ['01', '05', '09', '11'])->get();
+
+        return compact('state_types');
+    }
+
+    public function records(Request $request)
+    {
+        $cacheParams = $request->only(['column', 'value', 'page', 'form']);
+        $cacheParams['items_per_page'] = config('tenant.items_per_page');
+        $cacheKey = 'quotation_list_user-' . auth()->id() . '_' . md5(json_encode($cacheParams));
+        $loadRecords = fn () => new QuotationCollection(
+            $this->getRecords($request)->paginate(config('tenant.items_per_page'))
+        );
+
+        if ($this->pingCache()) {
+            return $this->cacheWithTagKey(
+                $cacheKey,
+                ['quotation_list'],
+                300, // 5 minutos
+                $loadRecords
+            );
+        }
+
+        return $loadRecords();
+    }
+
+    private function getRecords($request)
+    {
+        $column = $request->input('column');
+        $value = $request->input('value');
+        $query = Quotation::query();
+
+        $form = json_decode($request->form ?: '{}');
+        // Vista unificada por defecto: empresa + tienda virtual (distinción vía source / badges)
+        $source = $form->source ?? 'all';
+
+        if ($source === 'ecommerce') {
+            $query->whereSourceEcommerce();
+        } elseif ($source === 'admin') {
+            $query->whereSourceAdmin();
+        }
+        // source === 'all' → sin filtro de origen
+
+        if ($column === 'user_name') {
+            $query->whereHas('user', function ($q) use ($value) {
+                $q->where('name', 'like', "%{$value}%");
+            })
+                ->whereTypeUser();
+        } else if ($column === 'customer') {
+            $query->whereHas('person', function ($q) use ($value) {
+                $q->where('name', 'like', "%{$value}%")
+                    ->orWhere('number', 'like', "%{$value}%");
+            })
+                ->whereTypeUser();
+
+        } else if ($column === 'seller_name') {
+            $query->whereHas('seller', function ($q) use ($value) {
+                $q->where('name', 'like', "%{$value}%");
+            });
+        } else if ($column === 'observations') {
+            if (!is_null($value) && $value !== '') {
+                $query->where('description', 'like', "%{$value}%");
+            }
+        } else if ($column === 'number') {
+            if (!is_null($value) && $value !== '') {
+                $query->where(function ($q) use ($value) {
+                    $q->where('id', $value)
+                        ->orWhere('number', $value);
+                });
+            }
+        } else {
+            $query->where($column, 'like', "%{$value}%")
+                ->whereTypeUser();
+        }
+
+        $records = $query->latest();
+
+        if (! empty($form->date_start) && ! empty($form->date_end)) {
+            $records = $records->whereBetween('date_of_issue', [$form->date_start, $form->date_end]);
+        }
+
+        $state_type_id = $form->state_type_id ?? null;
+        if ($state_type_id) $records->where('state_type_id', $state_type_id);
+
+        return $records;
+    }
+
+    public function searchCustomers(Request $request)
+    {
+
+        $customers = Person::whereType('customers')
+            ->orderBy('name')
+            ->whereIsEnabled();
+        if ($request->has('customer_id')) {
+            $customers->where('id', $request->customer_id);
+        } else {
+            $customers->where('number', 'like', "%{$request->input}%")
+                ->orWhere('name', 'like', "%{$request->input}%");
+        }
+        $customers = $customers->get()->transform(function ($row) {
+            /** @var Person $row */
+            return $row->getCollectionData();
+            /* Se ha movido al modelo */
+            return [
+                'id' => $row->id,
+                'description' => $row->number . ' - ' . $row->name,
+                'name' => $row->name,
+                'number' => $row->number,
+                'identity_document_type_id' => $row->identity_document_type_id,
+                'identity_document_type_code' => $row->identity_document_type->code,
+                'addresses' => $row->addresses,
+                'address' => $row->address,
+            ];
+        });
+        return compact('customers');
+    }
+
+
+    public function tables()
+    {
+
+        $customers = $this->table('customers');
+        $establishments = Establishment::where('id', auth()->user()->establishment_id)->get();
+        $currency_types = CurrencyType::whereActive()->get();
+        // $document_types_invoice = DocumentType::whereIn('id', ['01', '03'])->get();
+        $discount_types = ChargeDiscountType::whereType('discount')->whereLevel('item')->get();
+        $charge_types = ChargeDiscountType::whereType('charge')->whereLevel('item')->get();
+        $company = Company::active();
+        $document_type_03_filter = config('tenant.document_type_03_filter');
+        $payment_method_types = PaymentMethodType::orderBy('id', 'desc')->get();
+        $payment_destinations = $this->getPaymentDestinations();
+        $configuration = Configuration::select('destination_sale')->first();
+        $enabled_discount_global = Configuration::isGlobalDiscountEnabled();
+        $global_discount_types = ChargeDiscountType::whereIn('id', ['02', '03'])->whereActive()->get();
+        /*
+        carlomagno83/facturadorpro4#233
+
+        $sellers = User::without(['establishment'])
+            ->whereIn('type', ['seller'])
+            ->orWhere('id', auth()->user()->id)
+            ->get();
+        */
+        $sellers = User::GetSellers(false)->get();
+        $seller_id = auth()->user()->id;
+
+        return compact('customers','enabled_discount_global' ,'establishments','global_discount_types',  'currency_types', 'discount_types', 'charge_types', 'configuration',
+            'company', 'document_type_03_filter', 'payment_method_types', 'payment_destinations', 'sellers', 'seller_id');
+
+    }
+
+
+    public function option_tables()
+    {
+        $establishment = Establishment::where('id', auth()->user()->establishment_id)->first();
+        // Series filtradas por contexto (oculta dedicadas / restringe al grupo activo). Ver SeriesResolver.
+        $series = app(SeriesResolver::class)
+            ->applyContext(Series::where('establishment_id', $establishment->id))
+            ->get();
+        $document_types_invoice = DocumentType::whereIn('id', ['01', '03'])->get();
+        // $payment_method_types = PaymentMethodType::all();
+        $payment_method_types = PaymentMethodType::getPaymentMethodTypes();
+        $payment_destinations = $this->getPaymentDestinations();
+        // $sellers = User::GetSellers(true)->get();
+        $sellers = User::where('establishment_id', auth()->user()->establishment_id)->whereIn('type', ['seller', 'admin'])->orWhere('id', auth()->user()->id)->get();
+
+        return compact('series', 'document_types_invoice', 'payment_method_types', 'payment_destinations', 'sellers');
+    }
+
+    public function item_tables()
+    {
+        // $items = $this->table('items');
+        $items = SearchItemController::getItemsToQuotation();
+        $categories = [];
+        $affectation_igv_types = AffectationIgvType::whereActive()->get();
+        $system_isc_types = SystemIscType::whereActive()->get();
+        $price_types = PriceType::whereActive()->get();
+        $discount_types = ChargeDiscountType::whereType('discount')->whereLevel('item')->get();
+        $charge_types = ChargeDiscountType::whereType('charge')->whereLevel('item')->get();
+        $attribute_types = AttributeType::whereActive()->orderByDescription()->get();
+        $is_client = $this->getIsClient();
+        $operation_types = OperationType::whereActive()->get();
+
+        return compact(
+            'items',
+            'categories',
+            'operation_types',
+            'affectation_igv_types',
+            'system_isc_types',
+            'price_types',
+            'discount_types',
+            'charge_types',
+            'attribute_types',
+            'is_client'
+        );
+    }
+
+    public function record($id)
+    {
+        $record = new QuotationResource(Quotation::findOrFail($id));
+
+        return $record;
+    }
+
+    public function record2($id)
+    {
+        $record = new QuotationResource(Quotation::findOrFail($id));
+
+        return $record;
+    }
+
+
+    public function getFullDescription($row)
+    {
+
+        $desc = ($row->internal_id) ? $row->internal_id . ' - ' . $row->description : $row->description;
+        $category = ($row->category) ? " - {$row->category->name}" : "";
+        $brand = ($row->brand) ? " - {$row->brand->name}" : "";
+
+        $desc = "{$desc} {$category} {$brand}";
+
+        return $desc;
+    }
+
+    public function store(QuotationRequest $request)
+    {
+        DB::connection('tenant')->transaction(function () use ($request) {
+
+            $data = $this->mergeData($request);
+            $data['terms_condition'] = $this->getTermsCondition();
+
+            $this->quotation = Quotation::create($data);
+
+            foreach ($data['items'] as $row) {
+                $this->quotation->items()->create($row);
+            }
+
+            $this->savePayments($this->quotation, $data['payments']);
+
+            $this->setFilename();
+            $this->createPdf($this->quotation, "a4", $this->quotation->filename);
+
+        });
+
+        return [
+            'success' => true,
+            'data' => [
+                'id' => $this->quotation->id,
+                'number_full' => $this->quotation->number_full,
+            ],
+        ];
+    }
+
+    public function update(QuotationRequest $request)
+    {
+
+        DB::connection('tenant')->transaction(function () use ($request) {
+            // $data = $this->mergeData($request);
+            // return $request['id'];
+            $configuration = Configuration::select('terms_condition')->first();
+            $request['terms_condition'] = $this->getTermsCondition();
+
+            $this->quotation = Quotation::firstOrNew(['id' => $request['id']]);
+            $this->quotation->fill($request->all());
+            $this->quotation->customer = PersonInput::set($request['customer_id'], isset($request['customer_address_id']) ? $request['customer_address_id'] : null);
+            $this->quotation->items()->delete();
+
+            $this->deleteAllPayments($this->quotation->payments);
+
+            foreach ($request['items'] as $row) {
+
+                $this->quotation->items()->create($row);
+            }
+
+            $this->savePayments($this->quotation, $request['payments']);
+
+            $this->setFilename();
+        });
+
+        return [
+            'success' => true,
+            'data' => [
+                'id' => $this->quotation->id,
+            ],
+        ];
+
+    }
+
+    public function getTermsCondition()
+    {
+
+        $configuration = Configuration::select('terms_condition')->first();
+
+        if ($configuration) {
+            return $configuration->terms_condition;
+        }
+
+        return null;
+
+    }
+
+
+    public function duplicate(Request $request)
+    {
+        // return $request->id;
+        $obj = Quotation::find($request->id);
+        $this->quotation = $obj->replicate();
+        $this->quotation->external_id = Str::uuid()->toString();
+        $this->quotation->state_type_id = '01';
+        $this->quotation->save();
+
+        foreach ($obj->items as $row) {
+            $new = $row->replicate();
+            $new->quotation_id = $this->quotation->id;
+            $new->save();
+        }
+
+        $this->setFilename();
+
+        return [
+            'success' => true,
+            'data' => [
+                'id' => $this->quotation->id,
+            ],
+        ];
+
+    }
+
+    public function anular($id)
+    {
+        $obj = Quotation::find($id);
+        $obj->state_type_id = 11;
+        $obj->save();
+        return [
+            'success' => true,
+            'message' => 'Producto anulado con éxito'
+        ];
+    }
+
+    public function mergeData($inputs)
+    {
+
+        $this->company = Company::active();
+
+        $values = [
+            'user_id' => auth()->id(),
+            'external_id' => Str::uuid()->toString(),
+            'customer' => PersonInput::set($inputs['customer_id'], isset($inputs['customer_address_id']) ? $inputs['customer_address_id'] : null),
+            'establishment' => EstablishmentInput::set($inputs['establishment_id']),
+            'soap_type_id' => $this->company->soap_type_id,
+            'state_type_id' => '01'
+        ];
+
+        $inputs->merge($values);
+
+        return $inputs->all();
+    }
+
+
+    private function setFilename()
+    {
+
+        $name = [$this->quotation->prefix, $this->quotation->id, date('Ymd')];
+        $this->quotation->filename = join('-', $name);
+        $this->quotation->save();
+
+    }
+
+
+    public function table($table)
+    {
+        switch ($table) {
+            case 'customers':
+
+                $customers = Person::whereType('customers')->whereIsEnabled()->orderBy('name')->take(20)->get()->transform(function ($row) {
+                    /** @var Person $row */
+                    return $row->getCollectionData();
+                    /** Se ha movido al modelo */
+                    return [
+                        'id' => $row->id,
+                        'description' => $row->number . ' - ' . $row->name,
+                        'name' => $row->name,
+                        'number' => $row->number,
+                        'identity_document_type_id' => $row->identity_document_type_id,
+                        'identity_document_type_code' => $row->identity_document_type->code,
+                        'addresses' => $row->addresses,
+                        'address' => $row->address
+                    ];
+                });
+                return $customers;
+
+                break;
+
+            case 'items':
+
+                return SearchItemController::getItemsToQuotation();
+
+                /*
+                $warehouse = Warehouse::where('establishment_id', auth()->user()->establishment_id)->first();
+
+                $items = Item::orderBy('description')->whereIsActive()
+                    // ->with(['warehouses' => function($query) use($warehouse){
+                    //     return $query->where('warehouse_id', $warehouse->id);
+                    // }])
+                    ->take(20)->get();
+
+                $this->ReturnItem($items);
+
+                return $items;
+                */
+
+                break;
+            default:
+                return [];
+
+                break;
+        }
+    }
+
+
+    /**
+     * Realiza la busqueda de producto en cotizacion.
+     * @param Request $request
+     * @return array
+     */
+    public function searchItems(Request $request)
+    {
+        $items = SearchItemController::getItemsToQuotation($request);
+        return compact('items');
+
+    }
+
+    /**
+     * Normaliza la salida de la colección de items para su consumo en las funciones.
+     *
+     */
+    public function ReturnItem(&$item)
+    {
+        $configuration = Configuration::first();
+        $establishment_id = auth()->user()->establishment_id;
+        $warehouse = \Modules\Inventory\Models\Warehouse::where('establishment_id', $establishment_id)->first();
+
+        $item->transform(function ($row) use ($configuration, $warehouse) {
+            /** @var \App\Models\Tenant\Item $row */
+            return $row->getDataToItemModal($warehouse, false, true);
+            /** Se ha movido al modelo*/
+            $full_description = $this->getFullDescription($row);
+            return [
+                'id' => $row->id,
+                'full_description' => $full_description,
+                'description' => $row->description,
+                'currency_type_id' => $row->currency_type_id,
+                'model' => $row->model,
+                'brand' => $row->brand,
+                'currency_type_symbol' => $row->currency_type->symbol,
+                'sale_unit_price' => $row->sale_unit_price,
+                'purchase_unit_price' => $row->purchase_unit_price,
+                'unit_type_id' => $row->unit_type_id,
+                'sale_affectation_igv_type_id' => $row->sale_affectation_igv_type_id,
+                'purchase_affectation_igv_type_id' => $row->purchase_affectation_igv_type_id,
+                'is_set' => (bool)$row->is_set,
+                'has_igv' => (bool)$row->has_igv,
+                'calculate_quantity' => (bool)$row->calculate_quantity,
+                'item_unit_types' => collect($row->item_unit_types)->transform(function ($row) {
+                    return [
+                        'id' => $row->id,
+                        'description' => "{$row->description}",
+                        'item_id' => $row->item_id,
+                        'unit_type_id' => $row->unit_type_id,
+                        'quantity_unit' => $row->quantity_unit,
+                        'price1' => $row->price1,
+                        'price2' => $row->price2,
+                        'price3' => $row->price3,
+                        'price_default' => $row->price_default,
+                    ];
+                }),
+                'warehouses' => collect($row->warehouses)->transform(function ($row) {
+                    return [
+                        'warehouse_id' => $row->warehouse->id,
+                        'warehouse_description' => $row->warehouse->description,
+                        'stock' => $row->stock,
+
+                    ];
+                }),
+
+            ];
+        });
+    }
+
+    public function searchItemById($id)
+    {
+
+        $items = SearchItemController::getItemsToQuotation(null, $id);
+        return compact('items');
+
+    }
+
+
+    public function searchCustomerById($id)
+    {
+        return $this->searchClientById($id);
+
+    }
+
+    public function download($external_id, $format)
+    {
+        $quotation = Quotation::where('external_id', $external_id)->first();
+
+        if (!$quotation) throw new Exception("El código {$external_id} es inválido, no se encontro la cotización relacionada");
+
+        $this->reloadPDF($quotation, $format, $quotation->filename);
+
+        return $this->downloadStorage($quotation->filename, 'quotation');
+    }
+
+    public function toPrint($external_id, $format)
+    {
+        $quotation = Quotation::where('external_id', $external_id)->first();
+
+        if (!$quotation) throw new Exception("El código {$external_id} es inválido, no se encontro la cotización relacionada");
+
+        $this->reloadPDF($quotation, $format, $quotation->filename);
+        $temp = tempnam(sys_get_temp_dir(), 'quotation');
+
+        file_put_contents($temp, $this->getStorage($quotation->filename, 'quotation'));
+
+        /*
+        $headers = [
+            'Content-Type' => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="'.$quotation->filename.'.pdf'.'"'
+        ];
+        */
+
+        $headers = $this->generalPdfResponseFileHeaders($quotation->filename);
+        $headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0, post-check=0, pre-check=0';
+        $headers['Pragma'] = 'no-cache';
+        $headers['Expires'] = 'Sat, 26 Jul 1997 05:00:00 GMT';
+
+        return response()->file($temp, $headers);
+    }
+
+    private function reloadPDF($quotation, $format, $filename)
+    {
+        $this->createPdf($quotation, $format, $filename);
+    }
+
+    public function createPdf($quotation = null, $format_pdf = null, $filename = null)
+    {
+        ini_set("pcre.backtrack_limit", "5000000");
+        $template = new Template();
+        $pdf = new Mpdf();
+
+        $document = ($quotation != null) ? $quotation : $this->quotation;
+        $company = ($this->company != null) ? $this->company : Company::active();
+        $filename = ($filename != null) ? $filename : $this->quotation->filename;
+
+        $configuration = Configuration::first();
+
+        $establishment_pdf = Establishment::find($document->establishment_id);
+        $base_template = $establishment_pdf->template_pdf;
+
+        if (in_array($format_pdf, ['ticket', 'ticket_80', 'ticket_58'], true)) {
+            $base_template = $establishment_pdf->template_ticket_pdf;
+        }
+
+        $html = $template->pdf($base_template, "quotation", $company, $document, $format_pdf);
+
+        if ($format_pdf === 'ticket' or $format_pdf === 'ticket_80') {
+
+            $width = 78;
+            if (config('tenant.enabled_template_ticket_80')) $width = 76;
+
+            $company_name = (strlen($company->name) / 20) * 10;
+            $company_address = (strlen($document->establishment->address) / 30) * 10;
+            $company_number = $document->establishment->telephone != '' ? '10' : '0';
+            $customer_name = strlen($document->customer->name) > '25' ? '10' : '0';
+            $customer_address = (strlen($document->customer->address) / 200) * 10;
+            $p_order = $document->purchase_order != '' ? '10' : '0';
+
+            $total_exportation = $document->total_exportation != '' ? '10' : '0';
+            $total_free = $document->total_free != '' ? '10' : '0';
+            $total_unaffected = $document->total_unaffected != '' ? '10' : '0';
+            $total_exonerated = $document->total_exonerated != '' ? '10' : '0';
+            $total_taxed = $document->total_taxed != '' ? '10' : '0';
+            $quantity_rows = count($document->items);
+            $payments = $document->payments()->count() * 5;
+            $discount_global = 0;
+            $terms_condition = $document->terms_condition ? 15 : 0;
+            $contact = $document->contact ? 15 : 0;
+
+            $document_description = ($document->description) ? count(explode("\n", $document->description)) * 3 : 0;
+
+
+            foreach ($document->items as $it) {
+                if ($it->discounts) {
+                    $discount_global = $discount_global + 1;
+                }
+            }
+            $legends = $document->legends != '' ? '10' : '0';
+
+            $pdf = new Mpdf([
+                'mode' => 'utf-8',
+                'format' => [
+                    $width,
+                    120 +
+                    ($quantity_rows * 8) +
+                    ($discount_global * 3) +
+                    $company_name +
+                    $company_address +
+                    $company_number +
+                    $customer_name +
+                    $customer_address +
+                    $p_order +
+                    $legends +
+                    $total_exportation +
+                    $total_free +
+                    $total_unaffected +
+                    $payments +
+                    $total_exonerated +
+                    $terms_condition +
+                    $contact +
+                    $document_description +
+                    $total_taxed],
+                'margin_top' => 2,
+                'margin_right' => 5,
+                'margin_bottom' => 0,
+                'margin_left' => 5,
+                'default_font' => 'monospace'
+            ]);
+        } else if ($format_pdf === 'a5') {
+
+            $company_name = (strlen($company->name) / 20) * 10;
+            $company_address = (strlen($document->establishment->address) / 30) * 10;
+            $company_number = $document->establishment->telephone != '' ? '10' : '0';
+            $customer_name = strlen($document->customer->name) > '25' ? '10' : '0';
+            $customer_address = (strlen($document->customer->address) / 200) * 10;
+            $p_order = $document->purchase_order != '' ? '10' : '0';
+
+            $total_exportation = $document->total_exportation != '' ? '10' : '0';
+            $total_free = $document->total_free != '' ? '10' : '0';
+            $total_unaffected = $document->total_unaffected != '' ? '10' : '0';
+            $total_exonerated = $document->total_exonerated != '' ? '10' : '0';
+            $total_taxed = $document->total_taxed != '' ? '10' : '0';
+            $quantity_rows = count($document->items);
+            $discount_global = 0;
+            foreach ($document->items as $it) {
+                if ($it->discounts) {
+                    $discount_global = $discount_global + 1;
+                }
+            }
+            $legends = $document->legends != '' ? '10' : '0';
+
+
+            $alto = ($quantity_rows * 8) +
+                ($discount_global * 3) +
+                $company_name +
+                $company_address +
+                $company_number +
+                $customer_name +
+                $customer_address +
+                $p_order +
+                $legends +
+                $total_exportation +
+                $total_free +
+                $total_unaffected +
+                $total_exonerated +
+                $total_taxed;
+            $diferencia = 148 - (float)$alto;
+
+            $pdf = new Mpdf([
+                'mode' => 'utf-8',
+                'format' => [
+                    210,
+                    $diferencia + $alto
+                ],
+                'margin_top' => 2,
+                'margin_right' => 5,
+                'margin_bottom' => 0,
+                'margin_left' => 5,
+                'default_font' => 'arial'
+            ]);
+
+
+        } else {
+
+
+            $pdf_font_regular = config('tenant.pdf_name_regular');
+            $pdf_font_bold = config('tenant.pdf_name_bold');
+
+            if ($pdf_font_regular != false) {
+                $defaultConfig = (new ConfigVariables())->getDefaults();
+                $fontDirs = $defaultConfig['fontDir'];
+
+                $defaultFontConfig = (new FontVariables())->getDefaults();
+                $fontData = $defaultFontConfig['fontdata'];
+
+                $default = [
+                    'fontDir' => array_merge($fontDirs, [
+                        app_path('CoreFacturalo' . DIRECTORY_SEPARATOR . 'Templates' .
+                            DIRECTORY_SEPARATOR . 'pdf' .
+                            DIRECTORY_SEPARATOR . $base_template .
+                            DIRECTORY_SEPARATOR . 'font')
+                    ]),
+                    'fontdata' => $fontData + [
+                            'custom_bold' => [
+                                'R' => $pdf_font_bold . '.ttf',
+                            ],
+                            'custom_regular' => [
+                                'R' => $pdf_font_regular . '.ttf',
+                            ],
+                        ],
+                    'default_font' => 'arial'
+                ];
+
+                if ($base_template == 'citec') {
+                    $default = [
+                        'mode' => 'utf-8',
+                        'margin_top' => 2,
+                        'margin_right' => 0,
+                        'margin_bottom' => 0,
+                        'margin_left' => 0,
+                        'fontDir' => array_merge($fontDirs, [
+                            app_path('CoreFacturalo' . DIRECTORY_SEPARATOR . 'Templates' .
+                                DIRECTORY_SEPARATOR . 'pdf' .
+                                DIRECTORY_SEPARATOR . $base_template .
+                                DIRECTORY_SEPARATOR . 'font')
+                        ]),
+                        'fontdata' => $fontData + [
+                                'custom_bold' => [
+                                    'R' => $pdf_font_bold . '.ttf',
+                                ],
+                                'custom_regular' => [
+                                    'R' => $pdf_font_regular . '.ttf',
+                                ],
+                            ],
+                        'default_font' => 'arial'
+                    ];
+
+                }
+
+                $pdf = new Mpdf($default);
+            }
+            else {
+                $pdf = new Mpdf([
+                    'default_font' => 'arial'
+                ]);
+            }
+        }
+
+        $path_css = app_path('CoreFacturalo' . DIRECTORY_SEPARATOR . 'Templates' .
+            DIRECTORY_SEPARATOR . 'pdf' .
+            DIRECTORY_SEPARATOR . $base_template .
+            DIRECTORY_SEPARATOR . 'style.css');
+
+        $stylesheet = file_get_contents($path_css);
+
+        $pdf->WriteHTML($stylesheet, HTMLParserMode::HEADER_CSS);
+        // $pdf->WriteHTML($html, HTMLParserMode::HTML_BODY);
+
+        if ($format_pdf != 'ticket') {
+            if (config('tenant.pdf_template_footer')) {
+
+                $html_footer = $template->pdfFooter($base_template, $this->quotation);
+                // $html_footer_term_condition = ($document->terms_condition) ? $template->pdfFooterTermCondition($base_template, $document) : "";
+
+                $html_footer_legend = "";
+                if ($configuration->legend_footer) {
+                    $html_footer_legend = $template->pdfFooterLegend($base_template, $this->quotation);
+                }
+
+                $html_footer_images = "";
+                $this->setPdfFooterImages($html_footer_images, $configuration, $format_pdf, $template, $base_template);
+
+                $pdf->setAutoBottomMargin = 'stretch';
+
+                $pdf->SetHTMLFooter($html_footer_images . $html_footer . $html_footer_legend);
+                // $pdf->SetHTMLFooter($html_footer_term_condition . $html_footer . $html_footer_legend);
+
+            }
+            //$html_footer = $template->pdfFooter();
+            //$pdf->SetHTMLFooter($html_footer);
+        }
+
+        $pdf->WriteHTML($html, HTMLParserMode::HTML_BODY);
+
+        $this->uploadFile($filename, $pdf->output('', 'S'), 'quotation');
+    }
+
+
+    /**
+     * Asignar imagenes en footer
+     *
+     * @param string $html_footer_images
+     * @param Configuration $configuration
+     * @param string $format_pdf
+     * @param Template $template
+     * @param string $base_template
+     * @return void
+     */
+    public function setPdfFooterImages(&$html_footer_images, $configuration, $format_pdf, $template, $base_template)
+    {
+        if ($format_pdf === 'a4' && $configuration->applyImagesInPdfFooter() && in_array($base_template, ['default', 'default3'])) {
+            $html_footer_images = $template->pdfFooterImages($base_template, $configuration->getBase64PdfFooterImages());
+        }
+    }
+
+
+    public function uploadFile($filename, $file_content, $file_type)
+    {
+        $this->uploadStorage($filename, $file_content, $file_type);
+    }
+
+    public function email(Request $request)
+    {
+        $request->validate([
+            'customer_email' => 'required|email'
+        ]);
+
+        $client = Person::find($request->customer_id);
+        $quotation = Quotation::find($request->id);
+        $customer_email = $request->input('customer_email');
+
+        // $this->reloadPDF($quotation, "a4", $quotation->filename);
+
+        $email = $customer_email;
+        $mailable = new QuotationEmail($client, $quotation);
+        $id = (int)$request->id;
+        $sendIt = EmailController::SendMail($email, $mailable, $id, 3);
+        /*
+        Configuration::setConfigSmtpMail();
+        $array_email = explode(',', $customer_email);
+        if (count($array_email) > 1) {
+            foreach ($array_email as $email_to) {
+                $email_to = trim($email_to);
+                if(!empty($email_to)) {
+                    Mail::to($email_to)->send(new QuotationEmail($client, $quotation));
+                }
+            }
+        } else {
+            Mail::to($customer_email)->send(new QuotationEmail($client, $quotation));
+        }
+        */
+        return [
+            'success' => true
+        ];
+    }
+
+
+    public function savePayments($quotation, $payments)
+    {
+
+        foreach ($payments as $payment) {
+
+            $record_payment = $quotation->payments()->create($payment);
+
+            if (isset($payment['payment_destination_id'])) {
+                $this->createGlobalPayment($record_payment, $payment);
+            }
+        }
+    }
+
+    public function changed($id)
+    {
+        $record = Quotation::find($id);
+        $record->changed = true;
+        $record->save();
+
+        return [
+            'success' => true
+        ];
+    }
+
+    public function updateStateType($state_type_id, $id)
+    {
+        $record = Quotation::find($id);
+        $record->state_type_id = $state_type_id;
+        $record->save();
+
+        return [
+            'success' => true,
+            'message' => 'Estado actualizado correctamente'
+        ];
+    }
+
+    /**
+     * Datos para el modal de definición/confirmación de precios (ecommerce).
+     */
+    public function pricesRecord($id)
+    {
+        $quotation = Quotation::with(['items', 'currency_type', 'person'])->findOrFail($id);
+
+        if (! $quotation->isFromEcommerce()) {
+            return [
+                'success' => false,
+                'message' => 'Solo las cotizaciones de tienda virtual usan este flujo.',
+            ];
+        }
+
+        if ((string) $quotation->state_type_id === '11') {
+            return [
+                'success' => false,
+                'message' => 'La cotización está anulada.',
+            ];
+        }
+
+        $items = $quotation->items->map(function ($row) {
+            $itemJson = is_array($row->item) ? $row->item : (array) $row->item;
+            $suggested = (float) (
+                $itemJson['suggested_unit_price']
+                ?? $itemJson['sale_unit_price']
+                ?? $row->unit_price
+                ?? 0
+            );
+
+            return [
+                'id' => $row->id,
+                'item_id' => $row->item_id,
+                'description' => $itemJson['description'] ?? $row->name_product_pdf ?? 'Producto',
+                'internal_id' => $itemJson['internal_id'] ?? null,
+                'quantity' => (float) $row->quantity,
+                'affectation_igv_type_id' => $row->affectation_igv_type_id ?: '10',
+                'percentage_igv' => (float) ($row->percentage_igv ?: 18),
+                'unit_price' => (float) $row->unit_price,
+                'suggested_unit_price' => $suggested,
+                'discount_percentage' => $this->extractItemDiscountPercentage($row->discounts),
+                'total_discount' => (float) ($row->total_discount ?? 0),
+                'total' => (float) $row->total,
+            ];
+        })->values();
+
+        $customerData = is_array($quotation->customer)
+            ? $quotation->customer
+            : (array) $quotation->customer;
+        $customerName = $customerData['name']
+            ?? optional($quotation->person)->name
+            ?? '';
+
+        return [
+            'success' => true,
+            'data' => [
+                'id' => $quotation->id,
+                'number_full' => $quotation->number_full,
+                'identifier' => $quotation->identifier,
+                'customer_name' => $customerName,
+                'currency_type_id' => $quotation->currency_type_id,
+                'state_type_id' => $quotation->state_type_id,
+                'needs_price_confirmation' => $quotation->needsPriceConfirmation(),
+                'total' => (float) $quotation->total,
+                'total_taxed' => (float) $quotation->total_taxed,
+                'total_igv' => (float) $quotation->total_igv,
+                'items' => $items,
+            ],
+        ];
+    }
+
+    /**
+     * Actualiza cantidades, precios y descuentos %, recalcula IGV/totales y regenera PDF.
+     * Los ítems quedan listos para generar Factura/Boleta/NV con los mismos valores.
+     */
+    public function updatePrices(Request $request)
+    {
+        $request->validate([
+            'id' => 'required|integer',
+            'items' => 'required|array|min:1',
+            'items.*.id' => 'required|integer',
+            'items.*.quantity' => 'required|numeric|min:0.01',
+            'items.*.unit_price' => 'required|numeric|min:0.01',
+            'items.*.discount_percentage' => 'nullable|numeric|min:0|max:100',
+        ]);
+
+        try {
+            $quotation = null;
+
+            DB::connection('tenant')->transaction(function () use ($request, &$quotation) {
+                $quotation = Quotation::with('items')->lockForUpdate()->findOrFail($request->input('id'));
+
+                if (! $quotation->isFromEcommerce()) {
+                    throw new Exception('Solo se pueden confirmar precios en cotizaciones de tienda virtual.');
+                }
+
+                if ((string) $quotation->state_type_id === '11') {
+                    throw new Exception('No se puede modificar una cotización anulada.');
+                }
+
+                if ($quotation->documents()->exists()) {
+                    throw new Exception('La cotización ya tiene comprobantes asociados.');
+                }
+
+                $payloadById = collect($request->input('items'))->keyBy('id');
+                $totals = [
+                    'total_taxed' => 0.0,
+                    'total_exonerated' => 0.0,
+                    'total_unaffected' => 0.0,
+                    'total_igv' => 0.0,
+                    'total_value' => 0.0,
+                    'total_discount' => 0.0,
+                    'total' => 0.0,
+                ];
+
+                foreach ($quotation->items as $row) {
+                    if (! $payloadById->has($row->id)) {
+                        throw new Exception('Falta información de uno o más productos de la cotización.');
+                    }
+
+                    $payload = $payloadById[$row->id];
+                    $unitPrice = round((float) $payload['unit_price'], 6);
+                    $quantity = round((float) $payload['quantity'], 4);
+                    $discountPercentage = round((float) ($payload['discount_percentage'] ?? 0), 4);
+
+                    if ($unitPrice <= 0) {
+                        throw new Exception('Todos los precios unitarios deben ser mayores a cero.');
+                    }
+                    if ($quantity <= 0) {
+                        throw new Exception('Todas las cantidades deben ser mayores a cero.');
+                    }
+                    if ($discountPercentage < 0 || $discountPercentage > 100) {
+                        throw new Exception('El descuento porcentual debe estar entre 0 y 100.');
+                    }
+
+                    $calculated = $this->calculateQuotationItemTotals(
+                        $unitPrice,
+                        $quantity,
+                        $discountPercentage,
+                        $row->affectation_igv_type_id ?: '10',
+                        (float) ($row->percentage_igv ?: 18)
+                    );
+
+                    $affectation = $row->affectation_igv_type_id ?: '10';
+                    if ($affectation === '10') {
+                        $totals['total_taxed'] += $calculated['total_value'];
+                        $totals['total_igv'] += $calculated['total_igv'];
+                    } elseif ($affectation === '20') {
+                        $totals['total_exonerated'] += $calculated['total_value'];
+                    } else {
+                        $totals['total_unaffected'] += $calculated['total_value'];
+                    }
+
+                    $totals['total_value'] += $calculated['total_value'];
+                    $totals['total_discount'] += $calculated['total_discount'];
+                    $totals['total'] += $calculated['total'];
+
+                    $itemJson = is_array($row->item) ? $row->item : (array) $row->item;
+                    $itemJson['sale_unit_price'] = $unitPrice;
+                    $itemJson['unit_price'] = $unitPrice;
+                    $itemJson['prices_pending'] = false;
+
+                    $row->quantity = $quantity;
+                    $row->unit_price = $unitPrice;
+                    $row->unit_value = $calculated['unit_value'];
+                    $row->total_base_igv = $calculated['total_base_igv'];
+                    $row->percentage_igv = $calculated['percentage_igv'];
+                    $row->total_igv = $calculated['total_igv'];
+                    $row->total_taxes = $calculated['total_igv'];
+                    $row->total_value = $calculated['total_value'];
+                    $row->total_discount = $calculated['total_discount'];
+                    $row->total_charge = 0;
+                    $row->total = $calculated['total'];
+                    $row->discounts = $calculated['discounts'];
+                    $row->item = $itemJson;
+                    $row->save();
+                }
+
+                foreach ($totals as $key => $value) {
+                    $totals[$key] = round($value, 2);
+                }
+
+                $quotation->total_taxed = $totals['total_taxed'];
+                $quotation->total_exonerated = $totals['total_exonerated'];
+                $quotation->total_unaffected = $totals['total_unaffected'];
+                $quotation->total_igv = $totals['total_igv'];
+                $quotation->total_taxes = $totals['total_igv'];
+                $quotation->total_value = $totals['total_value'];
+                $quotation->total_discount = $totals['total_discount'];
+                $quotation->subtotal = $totals['total_value'];
+                $quotation->total = $totals['total'];
+                $quotation->save();
+            });
+
+            try {
+                if ($quotation && $quotation->filename) {
+                    $this->createPdf($quotation->fresh(['items', 'user', 'soap_type', 'state_type', 'currency_type']), 'a4', $quotation->filename);
+                }
+            } catch (Exception $pdfError) {
+                // Los precios ya se guardaron; el PDF puede regenerarse luego.
+            }
+
+            $fresh = $quotation->fresh();
+
+            return [
+                'success' => true,
+                'message' => 'Cotización actualizada correctamente.',
+                'data' => [
+                    'id' => $fresh->id,
+                    'total' => (float) $fresh->total,
+                    'total_discount' => (float) $fresh->total_discount,
+                    'needs_price_confirmation' => $fresh->needsPriceConfirmation(),
+                ],
+            ];
+        } catch (Exception $e) {
+            return [
+                'success' => false,
+                'message' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * Extrae el % de descuento de ítem desde el JSON discounts (tipo 00).
+     *
+     * @param  mixed  $discounts
+     */
+    private function extractItemDiscountPercentage($discounts): float
+    {
+        if (empty($discounts)) {
+            return 0.0;
+        }
+
+        $list = is_object($discounts) ? (array) $discounts : $discounts;
+        if (! is_array($list)) {
+            return 0.0;
+        }
+
+        foreach ($list as $entry) {
+            $row = is_object($entry) ? (array) $entry : $entry;
+            if (! is_array($row)) {
+                continue;
+            }
+            if (isset($row['percentage'])) {
+                return round((float) $row['percentage'], 4);
+            }
+            if (isset($row['factor'])) {
+                return round(((float) $row['factor']) * 100, 4);
+            }
+        }
+
+        return 0.0;
+    }
+
+    /**
+     * Recalcula totales de línea con descuento % que afecta la base imponible (tipo 00).
+     * Misma lógica comercial que calculateRowItem del frontend.
+     */
+    private function calculateQuotationItemTotals(
+        float $unitPrice,
+        float $quantity,
+        float $discountPercentage,
+        string $affectation,
+        float $percentageIgv
+    ): array {
+        $discountPercentage = max(0.0, min(100.0, $discountPercentage));
+        $factor = $discountPercentage / 100;
+
+        if ($affectation === '10') {
+            $unitValue = round($unitPrice / (1 + ($percentageIgv / 100)), 6);
+        } else {
+            $unitValue = round($unitPrice, 6);
+            $percentageIgv = 0.0;
+        }
+
+        $totalValuePartial = round($unitValue * $quantity, 6);
+        $totalDiscount = round($totalValuePartial * $factor, 2);
+        $totalValue = round($totalValuePartial - $totalDiscount, 2);
+
+        if ($affectation === '10') {
+            $totalBaseIgv = $totalValue;
+            $totalIgv = round($totalBaseIgv * ($percentageIgv / 100), 2);
+            $total = round($totalValue + $totalIgv, 2);
+        } else {
+            $totalBaseIgv = $totalValue;
+            $totalIgv = 0.0;
+            $total = $totalValue;
+        }
+
+        $discounts = [];
+        if ($discountPercentage > 0) {
+            $discounts[] = [
+                'discount_type_id' => '00',
+                'discount_type' => [
+                    'id' => '00',
+                    'description' => 'Descuentos que afectan la base imponible del IGV/IVAP',
+                    'active' => 1,
+                    'base' => true,
+                    'level' => 'item',
+                    'type' => 'discount',
+                ],
+                'description' => 'Descuento',
+                'factor' => round($factor, 5),
+                'amount' => $totalDiscount,
+                'base' => round($totalValuePartial, 2),
+                'percentage' => $discountPercentage,
+                'is_amount' => false,
+                'amount_exact' => 0,
+            ];
+        }
+
+        return [
+            'unit_value' => $unitValue,
+            'percentage_igv' => $percentageIgv,
+            'total_base_igv' => $totalBaseIgv,
+            'total_igv' => $totalIgv,
+            'total_value' => $totalValue,
+            'total_discount' => $totalDiscount,
+            'total' => $total,
+            'discounts' => $discounts,
+        ];
+    }
+
+    public function itemWarehouses($item_id)
+    {
+
+        $record = Item::find($item_id);
+        // dd($record->warehouses);
+
+        $establishment_id = auth()->user()->establishment_id;
+        $warehouse = ModuleWarehouse::where('establishment_id', $establishment_id)->first();
+
+        return collect($record->warehouses)->transform(function ($row) use ($warehouse) {
+            return [
+                'warehouse_description' => $row->warehouse->description,
+                'stock' => $row->stock,
+                'warehouse_id' => $row->warehouse_id,
+                'checked' => ($row->warehouse_id == $warehouse->id) ? true : false,
+            ];
+        });
+
+    }
+}

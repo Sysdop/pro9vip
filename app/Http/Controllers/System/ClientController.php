@@ -1,0 +1,1730 @@
+<?php
+
+    namespace App\Http\Controllers\System;
+
+    use App\CoreFacturalo\Helpers\Certificate\GenerateCertificate;
+    use App\Http\Controllers\Controller;
+    use App\Http\Requests\System\ClientRequest;
+    use App\Http\Resources\System\ClientCollection;
+    use App\Http\Resources\System\ClientResource;
+    use App\Models\System\BusinessTurn;
+    use App\Models\System\Client;
+    use App\Models\System\Configuration;
+    use App\Models\System\Module;
+    use App\Models\System\Plan;
+    use App\Models\System\Skin as SystemSkin;
+    use Carbon\Carbon;
+    use Exception;
+    use Hyn\Tenancy\Contracts\Repositories\HostnameRepository;
+    use Hyn\Tenancy\Contracts\Repositories\WebsiteRepository;
+    use Hyn\Tenancy\Environment;
+    use Hyn\Tenancy\Models\Hostname;
+    use Hyn\Tenancy\Models\Website;
+    use Illuminate\Http\Request;
+    use Illuminate\Support\Collection;
+    use Illuminate\Support\Facades\DB;
+    use Modules\Document\Helpers\DocumentHelper;
+    use Modules\MobileApp\Models\System\AppModule;
+    use App\CoreFacturalo\ClientHelper;
+    use Illuminate\Support\Str;
+    use Illuminate\Support\Facades\Cache;
+    use App\Helpers\GuestRegisterHelper;
+    use App\Models\System\PlanPeriod;
+    use App\Models\System\User as SystemUser;
+use App\Traits\StorageManagementTrait;
+use Illuminate\Support\Facades\Config;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+
+    class ClientController extends Controller
+    {
+        use StorageManagementTrait;
+
+        public function index()
+        {
+            return view('system.clients.index');
+        }
+
+        public function create()
+        {
+            return view('system.clients.form');
+        }
+
+        public function tables()
+        {
+
+            $url_base = '.' . config('tenant.app_url_base');
+            $plans = Plan::all();
+            $types = [['type' => 'admin', 'description' => 'Administrador'], ['type' => 'integrator', 'description' => 'Listar Documentos']];
+            $modules = Module::with('levels')
+                ->where('sort', '<', 14)
+                ->where('value', '!=', 'production_app')
+                ->orderBy('sort')
+                ->get()
+                ->each(function ($module) {
+                    return $this->prepareModules($module);
+                });
+
+            $apps = Module::with('levels')
+                ->where('sort', '>', 13)
+                ->where('value', '!=', 'production_app')
+                ->orderBy('sort')
+                ->get()
+                ->each(function ($module) {
+                    return $this->prepareModules($module);
+                });
+
+            // Giros de negocio administrables desde el panel system.
+            $business_turns = BusinessTurn::formOptions();
+
+            $plan_periods = PlanPeriod::all();
+
+            $config = Configuration::first();
+
+            $certificate_admin = $config->certificate;
+            $soap_username = $config->soap_username;
+            $soap_password = $config->soap_password;
+            $regex_password_client = $config->regex_password_client;
+
+            $global_smtp_config = [
+                'smtp_host' => $config->mail_host ?? 'smtp.gmail.com',
+                'smtp_port' => $config->mail_port ?? 465,
+                'smtp_user' => $config->mail_username ?? '',
+                'smtp_password' => $config->mail_password ?? '',
+                'smtp_encryption' => $config->mail_encryption ?? 'ssl',
+            ];
+
+            return compact(
+                'url_base',
+                'plans',
+                'plan_periods',
+                'types',
+                'modules',
+                'apps',
+                'certificate_admin',
+                'soap_username',
+                'soap_password',
+                'business_turns',
+                'regex_password_client',
+                'global_smtp_config');
+        }
+
+        /**
+         *
+         * Validar el override de mensajes de WhatsApp para un cliente: no puede
+         * ser menor al limite del plan (si el plan no es ilimitado).
+         *
+         * @param  int $plan_id
+         * @param  mixed $override
+         * @return string|null
+         */
+        private function validateWhatsappMessagesOverride($plan_id, $override)
+        {
+            if ($override === null || $override === '') {
+                return null;
+            }
+
+            if (!is_numeric($override)) {
+                return 'El valor de mensajes de WhatsApp no es un número válido.';
+            }
+
+            $plan = Plan::find($plan_id);
+
+            if ($plan && !$plan->whatsapp_messages_unlimited && (int) $override < (int) $plan->whatsapp_messages_limit) {
+                return "El límite de mensajes de WhatsApp para este cliente no puede ser menor al de su plan ({$plan->whatsapp_messages_limit}).";
+            }
+
+            return null;
+        }
+
+        /**
+         * Valida que el plan cumpla los límites NRUS cuando el régimen está activo.
+         * NRUS ya no restringe módulos: solo ventas (S/ 8000) y sucursales (1).
+         *
+         * @param  mixed $plan_id
+         * @param  bool $is_nrus
+         * @return string|null
+         */
+        private function validateNrusPlan($plan_id, $is_nrus)
+        {
+            if (!$is_nrus) {
+                return null;
+            }
+
+            $plan = Plan::find($plan_id);
+            if (!$plan) {
+                return 'Plan no encontrado.';
+            }
+
+            if (!$this->planMeetsNrusLimits($plan)) {
+                return 'El plan seleccionado no cumple los límites NRUS (ventas máx. S/ 8000 y 1 sucursal, sin límites ilimitados).';
+            }
+
+            return null;
+        }
+
+        /**
+         * Régimen NRUS enviado por el formulario; si no viene, se toma del plan.
+         *
+         * @param  \Illuminate\Http\Request $request
+         * @param  Plan|null $plan
+         * @return bool
+         */
+        private function resolveNrusFlag($request, $plan): bool
+        {
+            if ($request->has('nrus')) {
+                return filter_var($request->input('nrus'), FILTER_VALIDATE_BOOLEAN);
+            }
+
+            return $this->permissionsAreNrus($plan ? $plan->module_permissions : null);
+        }
+
+        /**
+         * Lee el régimen NRUS de un `module_permissions`. Antes NRUS se guardaba
+         * como el giro de negocio 6; ese valor se sigue reconociendo para las
+         * cuentas creadas antes del switch.
+         *
+         * @param  mixed $module_permissions
+         * @return bool
+         */
+        private function permissionsAreNrus($module_permissions): bool
+        {
+            $nrus = data_get($module_permissions, 'nrus');
+
+            if (!is_null($nrus)) {
+                return filter_var($nrus, FILTER_VALIDATE_BOOLEAN);
+            }
+
+            return (int) data_get($module_permissions, 'business') === BusinessTurn::NRUS_ID;
+        }
+
+        /**
+         * @param  Plan $plan
+         * @return bool
+         */
+        private function planMeetsNrusLimits(Plan $plan): bool
+        {
+            if ($plan->sales_unlimited || (float) $plan->sales_limit > 8000) {
+                return false;
+            }
+
+            if ($plan->establishments_unlimited || (int) $plan->establishments_limit > 1) {
+                return false;
+            }
+
+            return true;
+        }
+
+        private function prepareModules(Module $module): Module
+        {
+            $levels = [];
+            foreach ($module->levels as $level) {
+                array_push($levels, [
+                    'id' => "{$module->id}-{$level->id}",
+                    'description' => $level->description,
+                    'module_id' => $level->module_id,
+                    'is_parent' => false,
+                ]);
+            }
+            unset($module->levels);
+            $module->is_parent = true;
+            $module->childrens = $levels;
+            return $module;
+        }
+
+        /**
+         * Asegura que los módulos (por value) existan en el tenant.
+         * Evita que al activar "Configurar menú" se pierda al editar si la migración no corrió.
+         *
+         * @param  array<int> $systemModuleIds
+         */
+        private function ensureTenantModulesExist(array $systemModuleIds): void
+        {
+            if (empty($systemModuleIds)) {
+                return;
+            }
+
+            $systemModules = DB::connection('system')
+                ->table('modules')
+                ->whereIn('id', $systemModuleIds)
+                ->get(['value', 'description', 'sort']);
+
+            foreach ($systemModules as $systemModule) {
+                $exists = DB::connection('tenant')
+                    ->table('modules')
+                    ->where('value', $systemModule->value)
+                    ->exists();
+
+                if ($exists) {
+                    continue;
+                }
+
+                DB::connection('tenant')->table('modules')->insert([
+                    'value' => $systemModule->value,
+                    'description' => $systemModule->description,
+                    'order_menu' => (int) ($systemModule->sort ?? 99),
+                ]);
+            }
+        }
+
+        /**
+         * Mapea IDs de módulos del system → filas module_user del tenant (por value).
+         *
+         * @param  int   $userId
+         * @param  array<int> $systemModuleIds
+         * @return array<int, array{module_id:int, user_id:int|string}>
+         */
+        private function mapSystemModulesToTenantUserRows(int $userId, array $systemModuleIds): array
+        {
+            if (empty($systemModuleIds)) {
+                return [];
+            }
+
+            $this->ensureTenantModulesExist($systemModuleIds);
+
+            $values = DB::connection('system')
+                ->table('modules')
+                ->whereIn('id', $systemModuleIds)
+                ->pluck('value');
+
+            if ($values->isEmpty()) {
+                return [];
+            }
+
+            return DB::connection('tenant')
+                ->table('modules')
+                ->whereIn('value', $values)
+                ->get(['id'])
+                ->map(function ($module) use ($userId) {
+                    return [
+                        'module_id' => (int) $module->id,
+                        'user_id' => $userId,
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        /**
+         * Mapea IDs de module_levels del system → filas module_level_user del tenant (por value).
+         *
+         * @param  int   $userId
+         * @param  array<int> $systemLevelIds
+         * @return array<int, array{module_level_id:int, user_id:int|string}>
+         */
+        private function mapSystemLevelsToTenantUserRows(int $userId, array $systemLevelIds): array
+        {
+            if (empty($systemLevelIds)) {
+                return [];
+            }
+
+            $values = DB::connection('system')
+                ->table('module_levels')
+                ->whereIn('id', $systemLevelIds)
+                ->pluck('value');
+
+            if ($values->isEmpty()) {
+                return [];
+            }
+
+            return DB::connection('tenant')
+                ->table('module_levels')
+                ->whereIn('value', $values)
+                ->get(['id'])
+                ->map(function ($level) use ($userId) {
+                    return [
+                        'module_level_id' => (int) $level->id,
+                        'user_id' => $userId,
+                    ];
+                })
+                ->values()
+                ->all();
+        }
+
+        public function records()
+        {
+            $records = Client::latest()
+                ->get();
+            foreach ($records as &$row) {
+                $tenancy = app(Environment::class);
+                $tenancy->tenant($row->hostname->website);
+                // $row->count_doc = DB::connection('tenant')-> table('documents') ->count();
+
+                // #1256 aqui
+                $current_day = Carbon::now();
+                $current_month_start = $current_day->startOfMonth()->format('Y-m-d');
+                $current_month_end = $current_day->endOfMonth()->format('Y-m-d');
+                $row->current_count_doc_month = DB::connection('tenant')->table('documents')->whereBetween('date_of_issue', [$current_month_start, $current_month_end])->count(); // contador mensual
+                $row->count_doc_pse = DB::connection('tenant')->table('documents')->where('send_to_pse', true)->count();
+                //dd($row->count_doc_pse);
+
+                $tenant_configuration = DB::connection('tenant')
+                    ->table('configurations')
+                    ->first();
+
+                $row->count_doc = $tenant_configuration->quantity_documents;
+                $row->is_nrus = $this->permissionsAreNrus(
+                    data_get(json_decode($tenant_configuration->plan ?? 'null'), 'module_permissions')
+                );
+                $row->soap_type = DB::connection('tenant')
+                    ->table('companies')
+                    ->first()
+                    ->soap_type_id;
+                $row->count_user = DB::connection('tenant')
+                    ->table('users')
+                    ->count();
+                $row->count_sales_notes = DB::connection('tenant')
+                ->table('configurations')
+                ->first()
+                ->quantity_sales_notes;
+                $quantity_pending_documents = $this->getQuantityPendingDocuments();
+                $row->document_regularize_shipping = $quantity_pending_documents['document_regularize_shipping'];
+                $row->document_not_sent = $quantity_pending_documents['document_not_sent'];
+                $row->document_to_be_canceled = $quantity_pending_documents['document_to_be_canceled'];
+                $row->monthly_sales_total = 0;
+                $row->count_whatsapp_month = 0;
+
+                if ($row->start_billing_cycle) {
+
+                    $start_end_date = DocumentHelper::getStartEndDateForFilterDocument($row->start_billing_cycle);
+                    $init = $start_end_date['start_date'];
+                    $end = $start_end_date['end_date'];
+
+                    // $row->init_cycle = $init;
+                    // $row->end_cycle = $end;
+                    // dd($start_end_date);
+                    $client_helper = new ClientHelper();
+
+                    $row->count_doc_month = DB::connection('tenant')->table('documents')->whereBetween('date_of_issue', [$init, $end])->count();
+                    $row->sale_notes_quantity_if_include = 0;
+
+                    if($row->plan->includeSaleNotesLimitDocuments())
+                    {
+                        $row->sale_notes_quantity_if_include = $client_helper->getQuantitySaleNotesByDates($init->format('Y-m-d'), $end->format('Y-m-d'));
+                    }
+
+                    $row->count_sales_notes_month = DB::connection('tenant')->table('sale_notes')->whereBetween('date_of_issue', [$init, $end])->count();
+
+                    if ($row->count_sales_notes_month>0) {
+                        if ($row->count_sales_notes!=$row->count_sales_notes_month) {
+                            $row->count_sales_notes = DB::connection('tenant')
+                            ->table('configurations')
+                            ->where('id', 1)
+                            ->update([
+                                'quantity_sales_notes' => $row->count_sales_notes_month
+                            ]);
+                        }
+                    }
+                    $row->count_sales_notes = DB::connection('tenant')
+                    ->table('configurations')
+                    ->first()
+                    ->quantity_sales_notes;
+                    //dd($row->count_sales_notes);
+
+                    $row->monthly_sales_total = $client_helper->getSalesTotal($init->format('Y-m-d'), $end->format('Y-m-d'), $row->plan);
+
+                    // $end viene a medianoche (pensado para columnas de tipo date); whatsapp_message_logs.created_at
+                    // es datetime, asi que se extiende al fin del dia para no perder los envios de hoy
+                    $row->count_whatsapp_month = DB::connection('tenant')->table('whatsapp_message_logs')->whereBetween('created_at', [$init, (clone $end)->endOfDay()])->count();
+                }
+
+                $row->quantity_establishments = $this->getQuantityRecordsFromTable('establishments');
+            }
+
+            return new ClientCollection($records);
+        }
+
+
+        /**
+         *
+         * @param  string $table
+         * @return int
+         */
+        private function getQuantityRecordsFromTable($table)
+        {
+            return DB::connection('tenant')->table($table)->count();
+        }
+
+
+        private function getQuantityPendingDocuments()
+        {
+
+            return [
+                'document_regularize_shipping' => DB::connection('tenant')->table('documents')->where('state_type_id', '01')->where('regularize_shipping', true)->count(),
+                'document_not_sent' => DB::connection('tenant')->table('documents')->whereIn('state_type_id', ['01', '03'])->where('date_of_issue', '<=', date('Y-m-d'))->count(),
+                'document_to_be_canceled' => DB::connection('tenant')->table('documents')->where('state_type_id', '13')->count(),
+            ];
+
+        }
+
+
+        public function record($id)
+        {
+            $client = Client::findOrFail($id);
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            $user_id = 1;
+            // Se buscan los valores en las tablas de los clientes, luego se compara con las tablas de admin para mostrar
+            // correctamente la seleccion en la seccion de modulos de permisos
+            $modules = DB::connection('tenant')
+                ->table('modules')
+                ->where('modules.order_menu', '<=', 13)
+                ->join('module_user', 'module_user.module_id', '=', 'modules.id')
+                ->where('module_user.user_id', $user_id)
+                ->select('modules.value as value')
+                ->get()
+                ->pluck('value');
+            $client->modules = DB::connection('system')
+                ->table('modules')
+                ->wherein('value', $modules)
+                ->select('id')
+                ->distinct()
+                ->get()
+                ->pluck('id');
+
+            // Se buscan los valores en las tablas de los clientes, luego se compara con las tablas de admin para mostrar
+            // correctamente la seleccion en la seccion de modulos de permisos
+            // Apps
+            $apps = DB::connection('tenant')
+                ->table('modules')
+                ->where('modules.order_menu', '>', 13)
+                ->join('module_user', 'module_user.module_id', '=', 'modules.id')
+                ->where('module_user.user_id', $user_id)
+                ->select('modules.value as value')
+                ->get()
+                ->pluck('value');
+
+            $client->apps = DB::connection('system')
+                ->table('modules')
+                ->wherein('value', $apps)
+                ->select('id')
+                ->distinct()
+                ->get()
+                ->pluck('id');
+
+            // Se buscan los valores en las tablas de los clientes, luego se compara con las tablas de admin para mostrar
+            // correctamente la seleccion en la seccion de modulos de permisos
+            $levels = DB::connection('tenant')
+                ->table('module_level_user')
+                ->where('module_level_user.user_id', $user_id)
+                ->join('module_levels', 'module_levels.id', '=', 'module_level_user.module_level_id')
+                ->get()
+                ->pluck('value');
+
+            $client->levels = DB::connection('system')
+                ->table('module_levels')
+                ->wherein('value', $levels)
+                ->select('id')
+                ->distinct()
+                ->get()
+                ->pluck('id');
+
+            $config = DB::connection('tenant')
+                ->table('configurations')
+                ->first();
+
+            $client->config_system_env = $config->config_system_env;
+            $tenant_plan = json_decode($config->plan);
+            $module_permissions = data_get($tenant_plan, 'module_permissions', $client->plan->module_permissions);
+
+            $business = data_get($module_permissions, 'business');
+            $business = is_null($business) ? null : (int) $business;
+
+            // El giro 6 era NRUS; ahora NRUS es un switch y no ocupa un giro.
+            $client->business = ($business === BusinessTurn::NRUS_ID) ? null : $business;
+            $client->nrus = $this->permissionsAreNrus($module_permissions);
+
+            $client->smtp_host       = $config->smtp_host;
+            $client->smtp_port       = $config->smtp_port;
+            $client->smtp_user       = $config->smtp_user;
+            $client->smtp_password   = $config->smtp_password;
+            $client->smtp_encryption = $config->smtp_encryption;
+
+            $company = DB::connection('tenant')
+                ->table('companies')
+                ->first();
+
+            $client->soap_send_id = $company->soap_send_id;
+            $client->soap_type_id = $company->soap_type_id;
+            $client->soap_username = $company->soap_username;
+            $client->soap_password = $company->soap_password;
+            $client->soap_url = $company->soap_url;
+            $client->certificate = $company->certificate;
+            $client->number = $company->number;
+
+            return new ClientResource($client);
+
+        }
+
+        public function charts()
+        {
+            try {
+                $records = Client::all();
+                $count_documents = [];
+
+                foreach ($records as $row) {
+                    try {
+                        // Verificar que el cliente tenga hostname y website válidos
+                        if (!$row->hostname || !$row->hostname->website) {
+                            \Log::warning("Cliente {$row->number} no tiene hostname válido");
+                            continue;
+                        }
+
+                        $tenancy = app(Environment::class);
+                        $tenancy->tenant($row->hostname->website);
+
+                        // Verificar que la conexión tenant esté disponible
+                        if (!DB::connection('tenant')->getDatabaseName()) {
+                            \Log::warning("Cliente {$row->number} no tiene base de datos configurada");
+                            continue;
+                        }
+
+                        for ($i = 1; $i <= 12; $i++) {
+
+                            $date_initial = Carbon::create(null, $i)->startOfMonth();
+                            $date_final = Carbon::create(null, $i)->endOfMonth();
+
+                            $count = DB::connection('tenant')
+                                ->table('documents')
+                                ->whereBetween('date_of_issue', [$date_initial, $date_final])
+                                ->count();
+
+                            $count_documents[] = [
+                                'client' => $row->number,
+                                'month' => $i,
+                                'count' => $count
+                            ];
+                        }
+                    } catch (\Exception $e) {
+                        // Registrar el error pero continuar con los demás clientes
+                        \Log::warning("Error al procesar cliente {$row->number}: " . $e->getMessage());
+                        continue;
+                    }
+                }
+
+                $total_documents = collect($count_documents)->sum('count');
+
+                $groups_by_month = collect($count_documents)->groupBy('month');
+                $labels = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'];
+                $documents_by_month = [];
+
+                foreach ($groups_by_month as $month => $group) {
+                    $documents_by_month[] = $group->sum('count');
+                }
+
+                // Asegurarse de que siempre haya 12 meses (rellenar con 0 si falta alguno)
+                for ($i = 0; $i < 12; $i++) {
+                    if (!isset($documents_by_month[$i])) {
+                        $documents_by_month[$i] = 0;
+                    }
+                }
+
+                $line = [
+                    'labels' => $labels,
+                    'data' => $documents_by_month
+                ];
+
+                return compact('line', 'total_documents');
+
+            } catch (\Exception $e) {
+                \Log::error("Error general en charts(): " . $e->getMessage());
+
+                // Devolver datos vacíos en caso de error
+                $line = [
+                    'labels' => ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Set', 'Oct', 'Nov', 'Dic'],
+                    'data' => [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+                ];
+
+                return [
+                    'line' => $line,
+                    'total_documents' => 0,
+                ];
+            }
+        }
+
+        /**
+         * @param Request $request
+         *
+         * @return array
+         */
+        public function update(Request $request)
+        {
+            /**
+             * @var Collection $valueModules
+             * @var Collection $valueLevels
+             */
+            $user_id = 1;
+            $array_modules = [];
+            $array_levels = [];
+
+
+            $smtp_host = ($request->has('smtp_host')) ? $request->smtp_host : null;
+            $smtp_password = ($request->has('smtp_password')) ? $request->smtp_password : null;
+            $smtp_port = ($request->has('smtp_port')) ? $request->smtp_port : null;
+            $smtp_user = ($request->has('smtp_user')) ? $request->smtp_user : null;
+            $smtp_encryption = ($request->has('smtp_encryption')) ? $request->smtp_encryption : null;
+            try {
+
+                $temp_path = $request->input('temp_path');
+
+                $name_certificate = $request->input('certificate');
+
+                if ($temp_path) {
+
+                    try {
+                        $password = $request->input('password_certificate');
+                        $pfx = file_get_contents($temp_path);
+                        $pem = GenerateCertificate::typePEM($pfx, $password);
+                        $name = 'certificate_' . $request->input('number') . '.pem';
+                        if (!file_exists(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates'))) {
+                            mkdir(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates'));
+                        }
+                        file_put_contents(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates' . DIRECTORY_SEPARATOR . $name), $pem);
+                        $name_certificate = $name;
+
+                    } catch (Exception $e) {
+                        return [
+                            'success' => false,
+                            'message' => $e->getMessage()
+                        ];
+                    }
+                }
+
+
+                $client = Client::findOrFail($request->id);
+
+                $whatsapp_override_error = $this->validateWhatsappMessagesOverride($request->plan_id, $request->whatsapp_messages_limit_override);
+                if ($whatsapp_override_error) {
+                    return [
+                        'success' => false,
+                        'message' => $whatsapp_override_error,
+                    ];
+                }
+
+                $plan = Plan::find($request->plan_id);
+                $selected_business = $request->input('business', data_get($plan->module_permissions ?? [], 'business'));
+                $selected_business = is_null($selected_business) ? null : (int) $selected_business;
+                $is_nrus = $this->resolveNrusFlag($request, $plan);
+                $nrus_error = $this->validateNrusPlan($request->plan_id, $is_nrus);
+                if ($nrus_error) {
+                    return [
+                        'success' => false,
+                        'message' => $nrus_error,
+                    ];
+                }
+
+                $client
+                    ->setSmtpHost($smtp_host)
+                    ->setSmtpPort($smtp_port)
+                    ->setSmtpUser($smtp_user)
+                    //    ->setSmtpPassword($smtp_password)
+                    ->setSmtpEncryption($smtp_encryption);
+                if (!empty($smtp_password)) {
+                    $client->setSmtpPassword($smtp_password);
+                }
+                $client->plan_id = $request->plan_id;
+                $client->whatsapp_messages_limit_override = ($request->whatsapp_messages_limit_override === '' ? null : $request->whatsapp_messages_limit_override);
+                $client->price = $request->price;
+                $client->plan_period_id = $request->plan_period_id;
+                $client->phone_ws = $request->phone_ws;
+                $client->client_name = $request->client_name;
+                $client->contact_email = $request->contact_email;
+
+                $client->enable_list_product = $request->enable_list_product;
+                $client->save();
+
+                $plan_for_config = $plan->toArray();
+                $module_permissions = $plan_for_config['module_permissions'] ?? [];
+                $module_permissions = is_array($module_permissions) ? $module_permissions : (array) $module_permissions;
+                $module_permissions['business'] = $selected_business;
+                $module_permissions['nrus'] = $is_nrus;
+                $plan_for_config['module_permissions'] = $module_permissions;
+
+                $tenancy = app(Environment::class);
+                $tenancy->tenant($client->hostname->website);
+
+                // Se lee antes de sobreescribir el plan para saber si el régimen cambió.
+                $previous_config = DB::connection('tenant')->table('configurations')->where('id', 1)->first();
+                $was_nrus = $this->permissionsAreNrus(data_get(json_decode($previous_config->plan ?? 'null'), 'module_permissions'));
+
+                $clientData = [
+                    'plan' => json_encode($plan_for_config),
+                    'config_system_env' => $request->config_system_env,
+                    'limit_documents' => $plan->limit_documents,
+                    'smtp_host' => $client->smtp_host,
+                    'smtp_port' => $client->smtp_port,
+                    'smtp_user' => $client->smtp_user,
+                    'smtp_password' => $client->smtp_password,
+                    'smtp_encryption' => $client->smtp_encryption,
+                    'enable_list_product' => $client->enable_list_product,
+                ];
+                if (empty($client->smtp_password)) unset($clientData['smtp_password']);
+                DB::connection('tenant')
+                    ->table('configurations')
+                    ->where('id', 1)
+                    ->update($clientData);
+
+                DB::connection('tenant')
+                    ->table('companies')
+                    ->where('id', 1)
+                    ->update([
+                        'soap_type_id' => $request->soap_type_id,
+                        'soap_send_id' => $request->soap_send_id,
+                        'soap_username' => $request->soap_username,
+                        'soap_password' => $request->soap_password,
+                        'soap_url' => $request->soap_url,
+                        'certificate' => $name_certificate
+                    ]);
+
+
+                //modules
+                DB::connection('tenant')
+                    ->table('module_user')
+                    ->where('user_id', $user_id)
+                    ->delete();
+                DB::connection('tenant')
+                    ->table('module_level_user')
+                    ->where('user_id', $user_id)
+                    ->delete();
+
+                // Mapear por value (system → tenant). No usar IDs directos del system.
+                $array_modules = $this->mapSystemModulesToTenantUserRows(
+                    (int) $user_id,
+                    array_map('intval', (array) $request->modules)
+                );
+                $array_levels = $this->mapSystemLevelsToTenantUserRows(
+                    (int) $user_id,
+                    array_map('intval', (array) $request->levels)
+                );
+
+                // Se actualiza las tablas de permisos
+                if (!empty($array_modules)) {
+                    DB::connection('tenant')
+                        ->table('module_user')
+                        ->insert($array_modules);
+                }
+                if (!empty($array_levels)) {
+                    DB::connection('tenant')
+                        ->table('module_level_user')
+                        ->insert($array_levels);
+                }
+
+                if ($is_nrus) {
+                    $this->applyNrusTenantConfig();
+                } elseif ($was_nrus) {
+                    $this->revertNrusTenantConfig();
+                }
+
+                // Actualiza el modulo de farmacia.
+                $config = (array)DB::connection('tenant')
+                    ->table('configurations')
+                    ->first();
+                $config['is_pharmacy'] = (self::EnablePharmacy($user_id)) ? 1 : 0;
+                DB::connection('tenant')
+                    ->table('configurations')
+                    ->update($config);
+                return [
+                    'success' => true,
+                    'message' => 'Cliente Actualizado satisfactoriamente',
+                    'modules' => $array_modules,
+                    'levels' => $array_levels,
+                ];
+
+            } catch (Exception $e) {
+                return [
+                    'success' => false,
+                    'message' => $e->getMessage()
+                ];
+
+            }
+
+        }
+
+        /**
+         * Devuelve la informacion si el modulo de farmacia esta habilitado o no para activar la configuracion
+         * correspondiente
+         *
+         * @param int $user_id
+         *
+         * @return bool
+         */
+        public static function EnablePharmacy($user_id = 0)
+        {
+            $modulo_id = DB::connection('tenant')
+                ->table('modules')
+                ->where('value', 'digemid')
+                ->first()->id;
+            $modulo = DB::connection('tenant')
+                ->table('module_user')
+                ->where('module_id', $modulo_id)
+                ->where('user_id', $user_id)
+                ->first();
+
+            return ($modulo == null) ? false : true;
+
+        }
+
+        public function store(ClientRequest $request)
+        {
+            // Establecer tiempo de ejecución manual para evitar timeout
+            set_time_limit(3600); // 60 minutos
+            ini_set('memory_limit', '2048M');
+            \Log::info('=== INICIO STORE CLIENT ===', ['timestamp' => now()]);
+
+            $authAdmin = auth('admin')->user();
+            if ($authAdmin instanceof SystemUser && $authAdmin->reseller_id !== null && ! $authAdmin->canCreateClients()) {
+                return [
+                    'success' => false,
+                    'message' => 'No tiene permiso para crear nuevos clientes.',
+                ];
+            }
+
+            $whatsapp_override_error = $this->validateWhatsappMessagesOverride($request->input('plan_id'), $request->input('whatsapp_messages_limit_override'));
+            if ($whatsapp_override_error) {
+                return [
+                    'success' => false,
+                    'message' => $whatsapp_override_error,
+                ];
+            }
+
+            $plan = Plan::find($request->input('plan_id'));
+            $nrus_error = $this->validateNrusPlan($request->input('plan_id'), $this->resolveNrusFlag($request, $plan));
+            if ($nrus_error) {
+                return [
+                    'success' => false,
+                    'message' => $nrus_error,
+                ];
+            }
+
+            $hostname = new Hostname();
+            $website = new Website();
+
+            try {
+                $temp_path = $request->input('temp_path');
+                $configuration = Configuration::first();
+                \Log::info('Configuración obtenida', ['config_id' => $configuration->id ?? 'null']);
+
+                $name_certificate = $configuration->certificate;
+
+                if ($temp_path) {
+                    \Log::info('Procesando certificado', ['temp_path' => $temp_path]);
+                    try {
+                        $number = $request->input('number');
+                        $password = $request->input('password_certificate');
+                        $pfx = file_get_contents($temp_path);
+                        $pem = GenerateCertificate::typePEM($pfx, $password);
+                        $name = 'certificate_' . 'admin_tenant'. "_$number" . '.pem';
+                        if (!file_exists(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates'))) {
+                            mkdir(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates'));
+                        }
+                        file_put_contents(storage_path('app' . DIRECTORY_SEPARATOR . 'certificates' . DIRECTORY_SEPARATOR . $name), $pem);
+                        $name_certificate = $name;
+                        \Log::info('Certificado procesado exitosamente', ['name' => $name]);
+
+                    } catch (Exception $e) {
+                        \Log::error('Error procesando certificado', ['error' => $e->getMessage()]);
+                        return [
+                            'success' => false,
+                            'message' => $e->getMessage()
+                        ];
+                    }
+                }
+
+                $subDom = strtolower($request->input('subdomain'));
+                $uuid = config('tenant.prefix_database') . '_' . $subDom;
+                $fqdn = $subDom . '.' . config('tenant.app_url_base');
+                \Log::info('Variables de tenant creadas', ['uuid' => $uuid, 'fqdn' => $fqdn]);
+
+                $this->validateWebsite($uuid, $website);
+                \Log::info('Validación de website completada');
+
+                \Log::info('Creando website...');
+                $website->uuid = $uuid;
+                app(WebsiteRepository::class)->create($website);
+                \Log::info('Website creado', ['website_id' => $website->id]);
+
+                \Log::info('Creando y asociando hostname...');
+                $hostname->fqdn = $fqdn;
+                $hostname = app(HostnameRepository::class)->create($hostname);
+                app(HostnameRepository::class)->attach($hostname, $website);
+                \Log::info('Hostname creado y asociado', ['hostname_id' => $hostname->id]);
+
+                $token = Str::random(50);
+
+                \Log::info('Creando cliente...');
+                $client = Client::query()->create([
+                    'created_by_user_id' => auth('admin')->check() ? auth('admin')->id() : null,
+                    'hostname_id' => $hostname->id,
+                    'token' => $token,
+                    'email' => strtolower($request->input('email')),
+                    'name' => $request->input('name'),
+                    'number' => $request->input('number'),
+                    'plan_id' => $request->input('plan_id'),
+                    'locked_emission' => $request->input('locked_emission'),
+                    'whatsapp_messages_limit_override' => $request->input('whatsapp_messages_limit_override') !== '' ? $request->input('whatsapp_messages_limit_override') : null,
+                    'enable_list_product' => $request->input('enable_list_product'),
+                    'price' => $request->input('price'),
+                    'plan_period_id' => $request->input('plan_period_id'),
+                    'start_billing_cycle' => Carbon::now()->toDateString(),
+                    'ending_billing_cycle' => Carbon::now()->toDateString(),
+                    'client_name' => $request->input('client_name') ? $request->input('client_name') : $request->input('name'),
+                    'phone_ws' => $request->input('phone_ws'),
+                    'contact_email' => $request->input('contact_email') ? $request->input('contact_email') : $request->input('email'),
+                ]);
+                \Log::info('Cliente creado', ['client_id' => $client->id]);
+
+                $is_guest_register = $request->input('from_guest_register', false);
+                $payment_description = $is_guest_register
+                    ? 'Pago por autoregistro - Plan ' . optional($client->plan)->name
+                    : null;
+                $payment_created_by = $is_guest_register ? 'Autoregistro' : 'Sistema';
+
+                $payment_order = $client->createPayemtnOrder($payment_description, $payment_created_by, [
+                    'tenant_created' => true,
+                    'order_state_id' => $request->input('order_state_id')
+                ]);
+
+                \Log::info('Configurando tenancy...');
+                $tenancy = app(Environment::class);
+                $tenancy->tenant($website);
+                \Log::info('Tenancy configurado');
+
+                \Log::info('=== INICIANDO OPERACIONES EN TENANT DATABASE ===');
+                \Log::info('Insertando company...');
+                DB::connection('tenant')->table('companies')->insert([
+                    'identity_document_type_id' => '6',
+                    'number' => $request->input('number'),
+                    'name' => $request->input('name'),
+                    'trade_name' => $request->input('name'),
+                    'soap_type_id' => $request->soap_type_id,
+                    'soap_send_id' => $request->soap_send_id,
+                    'soap_username' => $request->soap_username,
+                    'soap_password' => $request->soap_password,
+                    'soap_url' => $request->soap_url,
+                    'certificate' => $name_certificate,
+                ]);
+
+                \Log::info('Company insertada');
+
+            $plan = Plan::findOrFail($request->input('plan_id'));
+            $selected_business = $request->input('business', data_get($plan->module_permissions, 'business'));
+            $selected_business = is_null($selected_business) ? null : (int) $selected_business;
+            $is_nrus = $this->resolveNrusFlag($request, $plan);
+            $plan_for_config = $plan->toArray();
+            $module_permissions = $plan_for_config['module_permissions'] ?? [];
+            $module_permissions = is_array($module_permissions) ? $module_permissions : (array) $module_permissions;
+            $module_permissions['business'] = $selected_business;
+            $module_permissions['nrus'] = $is_nrus;
+            $plan_for_config['module_permissions'] = $module_permissions;
+
+            $http = config('tenant.force_https') == true ? 'https://' : 'http://';
+
+            // Definir variable para registro de invitado
+            $from_guest_register = $request->input('from_guest_register', false);
+
+            \Log::info('Sembrando temas del sistema en el nuevo tenant...');
+            $customSystemSkins = SystemSkin::where('is_default', false)->where('is_visible_to_clients', true)->get();
+            foreach ($customSystemSkins as $customSkin) {
+                if (!DB::connection('tenant')->table('skins')->where('filename', $customSkin->filename)->exists()) {
+                    DB::connection('tenant')->table('skins')->insert([
+                        'name'      => $customSkin->name,
+                        'filename'  => $customSkin->filename,
+                        'status'    => 1,
+                        'is_system' => true,
+                    ]);
+                }
+            }
+
+            $replacedDefaultSkins = SystemSkin::where('is_default', true)->whereNotNull('custom_filename')->get();
+            foreach ($replacedDefaultSkins as $replacedSkin) {
+                DB::connection('tenant')->table('skins')
+                    ->where('filename', $replacedSkin->filename)
+                    ->where('is_system', true)
+                    ->update(['filename' => $replacedSkin->custom_filename]);
+            }
+
+            $tenantDefaultSkin = SystemSkin::where('is_tenant_default', true)->first();
+            $tenantSkinId = 3;
+            if ($tenantDefaultSkin) {
+                if ($tenantDefaultSkin->is_default) {
+                    // Los skins predeterminados tienen IDs consistentes entre system y tenant (seeded)
+                    $tenantSkinId = $tenantDefaultSkin->id;
+                } else {
+                    // Skin custom — buscar su ID en la tabla skins del tenant por filename
+                    $tenantSkin = DB::connection('tenant')->table('skins')
+                        ->where('filename', $tenantDefaultSkin->filename)
+                        ->first();
+                    $tenantSkinId = $tenantSkin ? $tenantSkin->id : 3;
+                }
+            }
+            \Log::info('Temas sembrados', ['tenant_skin_id' => $tenantSkinId]);
+
+            \Log::info('Insertando configuración...');
+            DB::connection('tenant')->table('configurations')->insert([
+                'send_auto' => true,
+                'locked_emission' => $request->input('locked_emission'),
+                'enable_list_product' => $request->input('enable_list_product'),
+                'ticket_single_shipment' => true,
+                'locked_tenant' => false,
+                'locked_users' => false,
+                'limit_documents' => $plan->limit_documents,
+                'limit_users' => $plan->limit_users,
+                'plan' => json_encode($plan_for_config),
+                'date_time_start' => date('Y-m-d H:i:s'),
+                'quantity_documents' => 0,
+                'config_system_env' => $request->config_system_env,
+                'login' => json_encode([
+                    'type' => 'image',
+                    'image' => $http.$fqdn.'/images/fondo-5.svg',
+                    'position_form' => 'right',
+                    'show_logo_in_form' => false,
+                    'position_logo' => 'top-left',
+                    'padding_in_form' => '2.5%',
+                    'show_socials' => false,
+                    'facebook' => null,
+                    'twitter' => null,
+                    'instagram' => null,
+                    'linkedin' => null,
+                    'tiktok' => null
+                ]),
+                'visual' => json_encode([
+                    'bg' => 'white',
+                    'header' => 'light',
+                    'navbar' => 'fixed',
+                    'sidebars' => 'light',
+                    'sidebar_theme' => 'white',
+                    'show_welcome_panel' => false
+                ]),
+                'skin_id' => $tenantSkinId,
+                'top_menu_a_id' => 1,
+                'top_menu_b_id' => 15,
+                'top_menu_c_id' => 76,
+                'quantity_sales_notes' => 0,
+                'from_guest_register' => $from_guest_register,
+                'date_of_due_test_days' => $plan->test_days > 0 ? Carbon::now()->addDays($plan->test_days)->toDateTimeLocalString() :null,
+                'has_advanced_statuses' => true,
+                'show_item_discounts_charges_attributes' => false,
+                'edit_name_product' => false,
+            ]);
+
+
+            \Log::info('Configuración insertada');
+
+            \Log::info('Sembrando Estados de Pedido Avanzados...');
+            DB::connection('tenant')->table('status_orders')->delete();
+
+            $advancedStatuses = [
+                // === ESTADOS FINANCIEROS (Payment) ===
+                ['description' => 'Pago pendiente', 'color' => '#ffc107', 'is_initial' => true, 'is_final' => false, 'is_payment_status' => true, 'is_shipping_status' => false, 'is_order_status' => false, 'action_mark_payment' => false, 'sort_order' => 1],
+                ['description' => 'Pago completado', 'color' => '#28a745', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => true, 'is_shipping_status' => false, 'is_order_status' => false, 'action_mark_payment' => true, 'action_generate_document' => true, 'sort_order' => 2],
+                ['description' => 'Pago rechazado', 'color' => '#dc3545', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => true, 'is_shipping_status' => false, 'is_order_status' => false, 'action_send_email' => true, 'sort_order' => 3],
+                ['description' => 'Reembolso', 'color' => '#6c757d', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => true, 'is_shipping_status' => false, 'is_order_status' => false, 'action_send_email' => true, 'sort_order' => 4],
+
+                // === ESTADOS LOGÍSTICOS (Shipping) ===
+                ['description' => 'Preparando pedido', 'color' => '#17a2b8', 'is_initial' => true, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => true, 'is_order_status' => false, 'action_discount_stock' => true, 'sort_order' => 5],
+                ['description' => 'Listo para recojo', 'color' => '#fd7e14', 'is_initial' => false, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => true, 'is_order_status' => false, 'action_send_email' => true, 'sort_order' => 6],
+                ['description' => 'En camino', 'color' => '#007bff', 'is_initial' => false, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => true, 'is_order_status' => false, 'action_notify_dispatch' => true, 'sort_order' => 7],
+                ['description' => 'Entregado', 'color' => '#28a745', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => false, 'is_shipping_status' => true, 'is_order_status' => false, 'action_mark_payment' => false, 'sort_order' => 8],
+                ['description' => 'Entrega pendiente', 'color' => '#ffc107', 'is_initial' => false, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => true, 'is_order_status' => false, 'action_send_email' => true, 'sort_order' => 9],
+
+                // === ESTADOS ADMINISTRATIVOS (Order) ===
+                ['description' => 'Nuevo pedido', 'color' => '#17a2b8', 'is_initial' => true, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => false, 'is_order_status' => true, 'sort_order' => 10],
+                ['description' => 'En proceso', 'color' => '#007bff', 'is_initial' => false, 'is_final' => false, 'is_payment_status' => false, 'is_shipping_status' => false, 'is_order_status' => true, 'sort_order' => 11],
+                ['description' => 'Cancelado', 'color' => '#dc3545', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => false, 'is_shipping_status' => false, 'is_order_status' => true, 'action_send_email' => true, 'action_void_order' => true, 'sort_order' => 12],
+                ['description' => 'Completado', 'color' => '#28a745', 'is_initial' => false, 'is_final' => true, 'is_payment_status' => false, 'is_shipping_status' => false, 'is_order_status' => true, 'sort_order' => 13],
+            ];
+
+            foreach ($advancedStatuses as $status) {
+                $status['created_at'] = now();
+                $status['updated_at'] = now();
+                DB::connection('tenant')->table('status_orders')->insert($status);
+            }
+
+
+            \Log::info('Configuración insertada');
+
+            \Log::info('Insertando establishment...');
+            $establishment_id = DB::connection('tenant')->table('establishments')->insertGetId([
+                'description' => 'Oficina Principal',
+                'country_id' => 'PE',
+                'department_id' => '15',
+                'province_id' => '1501',
+                'district_id' => '150101',
+                'address' => '-',
+                'email' => $request->input('email'),
+                'telephone' => '-',
+                'code' => '0000',
+                'template_ticket_pdf' => $is_nrus ? 'nrus' : 'default',
+            ]);
+            \Log::info('Establishment insertado', ['establishment_id' => $establishment_id]);
+
+            \Log::info('Insertando warehouse...');
+            DB::connection('tenant')->table('warehouses')->insertGetId([
+                'establishment_id' => $establishment_id,
+                'description' => 'Almacén Oficina Principal',
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+            \Log::info('Warehouse insertado');
+
+            \Log::info('Insertando series...');
+            // Siembra completa (como antes): CPE, NC/ND, retención, percepción,
+            // guías remitente/transportista, liquidación, NV y guías de almacén.
+            // NRUS: solo boleta + nota de venta. Fuente: SeriesCodeGenerator.
+            DB::connection('tenant')->table('series')->insert(
+                \App\Services\SeriesCodeGenerator::defaultTenantSeries($establishment_id, (bool) $is_nrus)
+            );
+            \Log::info('Series insertadas');
+
+            \Log::info('Insertando usuario...');
+                $user_id = DB::connection('tenant')->table('users')->insertGetId([
+                'name' => 'Administrador',
+                'email' => $request->input('email'),
+                'password' => bcrypt($request->input('password')),
+                'api_token' => $token,
+                'establishment_id' => $establishment_id,
+                'type' => $request->input('type'),
+                'locked' => false,
+                'permission_edit_cpe' => true,
+                'last_password_update' => date('Y-m-d H:i:s'),
+                'from_guest_register' => $from_guest_register
+            ]);
+            \Log::info('Usuario insertado', ['user_id' => $user_id]);
+
+            $this->insertDefaultColumnVisibility($user_id);
+
+            \Log::info('Configurando módulos y permisos...');
+            if ($request->input('type') == 'admin') {
+                // Importante: mapear por value. Los IDs del system NO coinciden con el tenant.
+                $array_modules = $this->mapSystemModulesToTenantUserRows(
+                    (int) $user_id,
+                    array_map('intval', (array) $request->modules)
+                );
+                $array_levels = $this->mapSystemLevelsToTenantUserRows(
+                    (int) $user_id,
+                    array_map('intval', (array) ($request->levels ?? []))
+                );
+
+                \Log::info('Insertando módulos de usuario...', ['count' => count($array_modules)]);
+                if (!empty($array_modules)) {
+                    DB::connection('tenant')->table('module_user')->insert($array_modules);
+                }
+                \Log::info('Insertando niveles de usuario...', ['count' => count($array_levels)]);
+                if (!empty($array_levels)) {
+                    DB::connection('tenant')->table('module_level_user')->insert($array_levels);
+                }
+
+                \Log::info('Insertando módulos de app...');
+                $this->insertAppModules($user_id);
+                \Log::info('Módulos de app insertados');
+
+            } else {
+                \Log::info('Insertando módulos básicos para integrator...');
+                DB::connection('tenant')->table('module_user')->insert([
+                    ['module_id' => 1, 'user_id' => $user_id],
+                    ['module_id' => 3, 'user_id' => $user_id],
+                    ['module_id' => 5, 'user_id' => $user_id],
+                ]);
+                \Log::info('Módulos básicos insertados');
+            }
+
+            if ($is_nrus) {
+                $this->applyNrusTenantConfig();
+            }
+
+            \Log::info('=== CLIENTE REGISTRADO EXITOSAMENTE ===', ['timestamp' => now()]);
+            return [
+                'success' => true,
+                'message' => 'Cliente Registrado satisfactoriamente',
+                'guest_register' => $this->runGuestRegister($from_guest_register, $user_id, $request->email, $client->id)
+
+            ];
+
+        } catch (Exception $e) {
+            Log::error('Error en store client', ['error' => $e->getTraceAsString()]);
+            app(HostnameRepository::class)->delete($hostname, true);
+            app(WebsiteRepository::class)->delete($website, true);
+            return [
+                'success' => false,
+                'message' => $e->getMessage()
+            ];
+        }
+    }
+
+        /**
+         * Configura el tenant para régimen NRUS: plantilla ticket PDF y tipo de operación 0113.
+         */
+        private function applyNrusTenantConfig(): void
+        {
+            DB::connection('tenant')->table('establishments')->update([
+                'template_ticket_pdf' => 'nrus',
+            ]);
+
+            DB::connection('tenant')->table('cat_operation_types')->update(['active' => false]);
+            DB::connection('tenant')->table('cat_operation_types')->where('id', '0113')->update(['active' => true]);
+        }
+
+        /**
+         * Deshace la configuración NRUS del tenant al desactivar el régimen: vuelve
+         * a la plantilla y al tipo de operación por defecto (venta interna 0101).
+         */
+        private function revertNrusTenantConfig(): void
+        {
+            DB::connection('tenant')->table('establishments')
+                ->where('template_ticket_pdf', 'nrus')
+                ->update(['template_ticket_pdf' => 'default']);
+
+            DB::connection('tenant')->table('cat_operation_types')->update(['active' => false]);
+            DB::connection('tenant')->table('cat_operation_types')->where('id', '0101')->update(['active' => true]);
+        }
+
+        private function runGuestRegister($from_guest_register, $user_id, $email, $client_id, $payment_order = null)
+        {
+            if($from_guest_register)
+            {
+                $helper = new GuestRegisterHelper();
+                $encrypt_client_id = $helper->encryptValue($client_id);
+                $payment_uuid = $payment_order ? $payment_order->uuid : null;
+                $helper->sendEmail($user_id, $email, $encrypt_client_id, $payment_uuid);
+
+                return [
+                    'user_id' => (string) $user_id,
+                    'key' => $encrypt_client_id,
+                    'payment_uuid' => $payment_uuid,
+                ];
+            }
+
+            return [];
+        }
+
+        public function validateWebsite($uuid, $website)
+        {
+
+            $exists = $website::where('uuid', $uuid)->first();
+
+            if ($exists) {
+                throw new Exception("El subdominio ya se encuentra registrado");
+            }
+
+        }
+
+
+        /**
+         *
+         * Registrar modulos de la app al usuario principal
+         *
+         * @param  int $user_id
+         * @return void
+         */
+        private function insertAppModules($user_id)
+        {
+            $all_app_modules = AppModule::get()->map(function($row) use($user_id){
+                                    return [
+                                        'app_module_id' => $row->id,
+                                        'user_id' => $user_id,
+                                    ];
+                                })->toArray();
+
+            DB::connection('tenant')->table('app_module_user')->insert($all_app_modules);
+        }
+
+
+        /**
+         *
+         * Columnas visibles por defecto en los listados de un tenant nuevo,
+         * los tenants existentes conservan el default de cada listado
+         *
+         * @param  int $user_id
+         * @return void
+         */
+        private function insertDefaultColumnVisibility($user_id)
+        {
+            $defaults = [
+                'users_index' => [
+                    'email'         => ['title' => 'Email',        'visible' => true],
+                    'name'          => ['title' => 'Nombre',       'visible' => true],
+                    'type'          => ['title' => 'Perfil',       'visible' => true],
+                    'app_modules'   => ['title' => 'Permisos app', 'visible' => false],
+                    'api_token'     => ['title' => 'Api Token',    'visible' => true],
+                    'establishment' => ['title' => 'Sucursal',     'visible' => false],
+                    'phone'         => ['title' => 'Teléfono',     'visible' => false],
+                    'bot'           => ['title' => 'Bot',          'visible' => false],
+                ],
+            ];
+
+            foreach ($defaults as $module => $columns) {
+                DB::connection('tenant')->table('columns_to_reports')->insert([
+                    'user_id' => $user_id,
+                    'report' => \App\Models\Tenant\ColumnsToReport::TENANT_DEFAULT_PREFIX . $module,
+                    'columns' => json_encode($columns),
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+        }
+
+
+        public function renewPlan(Request $request)
+        {
+
+            // dd($request->all());
+            $client = Client::findOrFail($request->id);
+            $client->whatsapp_messages_limit_override = null;
+            $client->save();
+
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+
+            DB::connection('tenant')->table('billing_cycles')->insert([
+                'date_time_start' => date('Y-m-d H:i:s'),
+                'renew' => true,
+                'quantity_documents' => DB::connection('tenant')->table('configurations')->where('id', 1)->first()->quantity_documents,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['quantity_documents' => 0]);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['quantity_sales_notes' => 0]);
+
+
+            return [
+                'success' => true,
+                'message' => 'Plan renovado con exito'
+            ];
+
+        }
+
+
+        public function lockedUser(Request $request)
+        {
+
+            $client = Client::findOrFail($request->id);
+            $client->locked_users = $request->locked_users;
+            $client->save();
+
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['locked_users' => $client->locked_users]);
+
+            return [
+                'success' => true,
+                'message' => ($client->locked_users) ? 'Limitar creación de usuarios activado' : 'Limitar creación de usuarios desactivado'
+            ];
+
+        }
+
+
+        public function lockedEmission(Request $request)
+        {
+
+            $client = Client::findOrFail($request->id);
+            $client->locked_emission = $request->locked_emission;
+            $client->save();
+
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['locked_emission' => $client->locked_emission]);
+
+            return [
+                'success' => true,
+                'message' => ($client->locked_emission) ? 'Limitar emisión de documentos activado' : 'Limitar emisión de documentos desactivado'
+            ];
+
+        }
+
+
+        public function lockedTenant(Request $request)
+        {
+
+            $client = Client::findOrFail($request->id);
+            $client->locked_tenant = $request->locked_tenant;
+            $client->save();
+
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['locked_tenant' => $client->locked_tenant]);
+
+            return [
+                'success' => true,
+                'message' => ($client->locked_tenant) ? 'Cuenta bloqueada' : 'Cuenta desbloqueada'
+            ];
+
+        }
+
+
+        /**
+         *
+         * Validar si el valor de confirmacion ingresado por el usuario es
+         * igual al ruc o nombre de la empresa, para poder eliminar el cliente
+         *
+         * @param  Client $client
+         * @param  string $input_validate
+         * @return array
+         */
+        public function checkInputValidateDelete(Client $client, $input_validate)
+        {
+
+            if($input_validate === $client->name || $input_validate === $client->number)
+            {
+                return $this->generalResponse(true);
+            }
+
+            return $this->generalResponse(false, 'El valor ingresado no coincide con el nombre o número de ruc de la empresa.');
+
+        }
+
+
+        /**
+         *
+         * Eliminar cliente
+         *
+         * @param  int $id
+         * @param  string $input_validate
+         * @return array
+         */
+        public function destroy($id, $input_validate)
+        {
+            $client = Client::findOrFail($id);
+
+            $check_input_validate_delete = $this->checkInputValidateDelete($client, $input_validate);
+            if(!$check_input_validate_delete['success']) return $check_input_validate_delete;
+
+            if ($client->locked) {
+                return [
+                    'success' => false,
+                    'message' => 'Cliente bloqueado, no puede eliminarlo'
+                ];
+            }
+
+            $hostname = Hostname::find($client->hostname_id);
+            $website = Website::find($hostname->website_id);
+
+            $uuid = $website->uuid;
+            // la ruta se resuelve antes de borrar el website, despues el uuid ya no
+            // esta en la tabla y la validacion fallaria
+            $tenant_path = $this->getValidatedTenantPath($uuid);
+
+            app(HostnameRepository::class)->delete($hostname, true);
+            app(WebsiteRepository::class)->delete($website, true);
+
+            // recien aca se tocan los archivos: si algo de arriba falla, el cliente
+            // y sus archivos quedan intactos
+            $storage = $this->deleteDirectory($tenant_path);
+
+            if (!$storage['removed']) {
+                Log::warning("No se pudo eliminar la carpeta del tenant {$uuid}", $storage);
+            }
+
+            return [
+                'success' => true,
+                'message' => 'Cliente eliminado con éxito'
+            ];
+        }
+
+        public function password($id)
+        {
+            $client = Client::findOrFail($id);
+            $website = Website::find($client->hostname->website_id);
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($website);
+            DB::connection('tenant')->table('users')
+                ->where('id', 1)
+                ->update(['password' => bcrypt($client->number)]);
+
+            return [
+                'success' => true,
+                'message' => 'Clave cambiada con éxito'
+            ];
+        }
+
+        public function startBillingCycle(Request $request)
+        {
+            $client = Client::findOrFail($request->id);
+            $client->start_billing_cycle = $request->start_billing_cycle;
+            $client->save();
+
+            return [
+                'success' => true,
+                'message' => ($client->start_billing_cycle) ? 'Ciclo de Facturacion definido.' : 'No se pudieron guardar los cambios.'
+            ];
+        }
+
+        public function upload(Request $request)
+        {
+            if ($request->hasFile('file')) {
+                $new_request = [
+                    'file' => $request->file('file'),
+                    'type' => $request->input('type'),
+                ];
+
+                return $this->upload_certificate($new_request);
+            }
+            return [
+                'success' => false,
+                'message' => 'Error al subir file.',
+            ];
+        }
+
+        public function upload_certificate($request)
+        {
+            $file = $request['file'];
+            $type = $request['type'];
+
+            $temp = tempnam(sys_get_temp_dir(), $type);
+            file_put_contents($temp, file_get_contents($file));
+
+            $mime = mime_content_type($temp);
+            $data = file_get_contents($temp);
+
+            return [
+                'success' => true,
+                'data' => [
+                    'filename' => $file->getClientOriginalName(),
+                    'temp_path' => $temp,
+                    //'temp_image' => 'data:' . $mime . ';base64,' . base64_encode($data)
+                ]
+            ];
+        }
+
+
+        /**
+         *
+         * @param  Request $request
+         * @return array
+         */
+        public function lockedByColumn(Request $request)
+        {
+            $column = $request->column;
+            $client = Client::findOrFail($request->id);
+            $client->{$column} = $request->{$column};
+            $client->save();
+
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update([$column => $client->{$column}]);
+
+            return $this->generalResponse(true, $client->{$column} ? 'Activado correctamente' : 'Desactivado correctamente');
+        }
+
+        public function confirmGuest(Request $request)
+        {
+            $client = Client::where('id',$request->id)->where('number',$request->number)->first();
+
+            if(!$client){
+                return $this->generalResponse(false, 'Empresa no encontrada');
+            }
+            $tenancy = app(Environment::class);
+            $tenancy->tenant($client->hostname->website);
+            $configuration = DB::connection('tenant')->table('configurations')->where('id', 1)->first();
+
+            if($configuration->was_verified_guest_user){
+                return $this->generalResponse(false,'Nuestro sistema indica que ya hemos verificado tu información anteriormente');
+            }
+
+            DB::connection('tenant')->table('users')->where('id', 1)->update(['email_verified_at' => now()]);
+            DB::connection('tenant')->table('configurations')->where('id', 1)->update(['was_verified_guest_user' => true]);
+            return [
+                'success' => true,
+                'data' => [
+                    'message' => "Cliente verificado con éxito."
+                ]
+            ];
+
+        }
+
+        public function search(Request $request)
+        {
+            $query = $request->input('query');
+
+            $clients = Client::where(function ($q) use ($query) {
+                $q->where('name', 'like', "%{$query}%")
+                    ->orWhere('number', 'like', "%{$query}%");
+            })->get();
+
+            $clients = $clients->transform(function($row) {
+                return [
+                    'id' => $row->id,
+                    'name' => $row->name,
+                ];
+            });
+
+            return compact('clients');
+        }
+
+        public function confirmLimitReseller(Request $request)
+        {
+            if ($this->resellerSystemAdminLacksPlansModule()) {
+                return $this->generalResponse(true, 'Sin evaluación de cupo de suscripción');
+            }
+
+            $limiteClientes = (int) config('app.limite_reseller' , 999);
+            $totalClientes = Client::count();
+
+            if($totalClientes >= $limiteClientes && $limiteClientes > 0){
+                return $this->generalResponse(false, 'Ha alcanzado el límite de clientes permitidos');
+            }
+
+            return $this->generalResponse(true, 'Aun puede registrar más clientes');
+        }
+
+        /**
+         * Sin permiso "plans" no se conoce el contexto del cupo de la suscripción; no aplicar aviso de límite.
+         */
+        protected function resellerSystemAdminLacksPlansModule(): bool
+        {
+            $user = auth('admin')->user();
+
+            return $user instanceof SystemUser
+                && $user->reseller_id !== null
+                && ! $user->canAccessSystemModule('plans');
+        }
+
+        public function testEmail(Request $request)
+        {
+            $request->validate([
+                'smtp_host' => 'required|string',
+                'smtp_port' => 'required|integer',
+                'smtp_user' => 'required|string',
+                'smtp_password' => 'required|string',
+                'email' => 'required|email',
+            ]);
+
+            $this->applyMailConfiguration($request->all());
+
+            $recipient = $request->email;
+            if (empty($recipient)) {
+                return response()->json(['success' => false, 'message' => 'No se especificó un correo de destino'], 422);
+            }
+
+            try {
+                Mail::raw('Este es un correo de prueba para verificar que tu configuración SMTP está funcionando correctamente.', function ($message) use ($recipient) {
+                    $message->to($recipient)->subject('Prueba de configuración SMTP');
+                });
+                return ['success' => true, 'message' => 'Correo de prueba enviado correctamente a ' . $recipient];
+            } catch (Exception $e) {
+                \Log::error('Mail test error: ' . $e->getMessage());
+                return response()->json(['success' => false, 'message' => 'Error al enviar correo: ' . $e->getMessage()], 500);
+            }
+        }
+
+        protected function applyMailConfiguration(array $data)
+        {
+            if (!empty($data['smtp_host'])) {
+                Config::set('mail.host', $data['smtp_host']);
+            }
+            if (!empty($data['smtp_port'])) {
+                Config::set('mail.port', $data['smtp_port']);
+            }
+            if (!empty($data['smtp_user'])) {
+                Config::set('mail.username', $data['smtp_user']);
+            }
+            if (!empty($data['smtp_password'])) {
+                Config::set('mail.password', $data['smtp_password']);
+            }
+            if (!empty($data['smtp_encryption'])) {
+                Config::set('mail.encryption', $data['smtp_encryption']);
+            } else {
+                Config::set('mail.encryption', null);
+            }
+        }
+    }

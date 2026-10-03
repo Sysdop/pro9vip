@@ -1,0 +1,742 @@
+<script>
+    window.__storefront_show_prices = {!! json_encode($storefront_show_prices ?? true) !!};
+</script>
+<style>
+#header_bar .header-menu {
+    max-height: 300px !important;
+    overflow:auto;
+    overflow-y: auto;
+}
+
+#header_bar .header-menu::-webkit-scrollbar-track {
+    -webkit-box-shadow: inset 0 0 6px rgba(0,0,0,0.1);
+    background-color: #fdfdfd;
+}
+
+#header_bar .header-menu::-webkit-scrollbar {
+    width: 6px;
+    background-color: #fdfdfd;
+}
+
+#header_bar .header-menu::-webkit-scrollbar-thumb {
+    background-color: #0187cc;
+}
+
+.header-dropdown a img {
+    border-radius: 8px;
+    padding: 4px;
+}
+
+@media (max-width: 768px) {
+    .header-dropdown {
+        min-width: 100px !important;
+    }
+}
+
+.header-menu ul a {
+    padding: 3px 6px;
+}
+
+.header-menu {
+    box-shadow: 0 0 2px rgba(0,0,0,0.1);
+    padding: 0 !important;
+    border: none;
+    opacity: 1;
+    visibility: visible;
+}
+
+.header-menu a:hover, .header-menu a:focus {
+    color: #0187cc;
+    background-color: #f4f4f4;
+}
+
+.header-menu ul a {
+    text-transform: capitalize !important;
+}
+
+.search_input {
+    margin-bottom: 0.1rem;
+    border-radius: 20px !important;
+}
+
+.search_input:focus {
+    background-color: #fff;
+    border-color: #fff;
+    box-shadow: none;
+}
+
+.header-contact span {
+    font-weight: normal;
+}
+
+div.cart-dropdown {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background-color: transparent;
+}
+
+.header .dropdown-toggle {
+    color: #fff;
+    font-size: 10px;
+    background-color: #1f1f39;
+    height: 35px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    border-radius: 20px;
+    padding: 0 10px;
+}
+
+.dropdown-toggle .cart-count {
+    background-color: transparent !important;
+    color: white !important;
+    margin-top: 12px;
+    margin-right: 27px;
+}
+
+.search_input:focus {
+    background-color: transparent !important;
+}
+
+.search_input {
+    width: 100%;
+    height: 38px !important;
+    border-radius: 20px !important;
+    background-color: #eff0f6 !important;
+    max-width: 100% !important;
+}
+
+.header-dropdown-inside {
+    position: relative;
+}
+
+.header-dropdown-inside .search-icon {
+    position: absolute;
+    left: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+}
+
+.header-dropdown-inside .search_input {
+    padding-left: 40px !important;
+    padding-right: 40px !important;
+    width: 100%;
+}
+
+.header-dropdown-inside .clear-icon {
+    position: absolute;
+    right: 10px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    display: none;
+}
+.header-dropdown-inside input:focus + .clear-icon,
+.header-dropdown-inside input:not(:placeholder-shown) + .clear-icon,
+.header-search-wrapper.active .clear-icon {
+    display: inline-block; /* Muestra el ícono */
+}
+/* Overlay oscuro */
+#search-overlay {
+    display: none;
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 14;
+}
+#search-overlay.active {
+    display: block;
+}
+.header-search-wrapper.active {
+    display: block;
+}
+
+/* Ajuste del header-dropdown dentro del wrapper */
+.header-search-wrapper .header-dropdown {
+    width: 100%;
+    background: #fff;
+    border-radius: 20px;
+    padding: 0;
+}
+
+/* Menú de resultados */
+.header-search-wrapper .header-menu {
+    background: #fff;
+    border-radius: 12px;
+    margin-top: 8px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.15);
+    height: auto;
+}
+
+/* Ícono de búsqueda en el botón - cursor pointer */
+.btn-search-icon {
+    cursor: pointer;
+}
+/* Forzar que el buscador y overlay estén sobre TODO, incluido el sticky header */
+.header-search-wrapper {
+    position: fixed;
+    top: 10px;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100vw - 100px);
+    max-width: 700px !important;
+    max-width: 90vw;
+    display: none;
+    z-index: 15;
+}
+
+.header .customlinks {
+    display: flex;
+    flex-shrink: 0;
+    align-items: center;
+    margin-right: 15px;
+    white-space: nowrap;
+}
+.header .customlinks a {
+    display: inline-block;
+    margin-left: 12px;
+    color: var(--title-color);
+    font-size: 14px;
+    font-weight: 500;
+    text-decoration: none;
+    white-space: nowrap;
+}
+.header .btn-search-icon {
+    display: flex;
+    align-items: center;
+    padding: 0;
+    line-height: 1;
+    background: transparent;
+    border: 0;
+}
+
+@media (max-width: 991.98px) {
+    .header .header-middle .container {
+        align-items: center;
+        gap: 4px;
+        min-height: 42px;
+    }
+    .header .mobile-menu-toggler,
+    .header .btn-search-icon,
+    .header .header-right .cart-dropdown > .dropdown-toggle,
+    .header .header-right .ecommerce-guest-login {
+        display: inline-flex;
+        flex: 0 0 auto;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 40px;
+        margin: 0;
+        padding: 0 !important;
+        color: var(--title-color);
+        border-radius: 12px;
+        transition: background-color .2s ease;
+        -webkit-tap-highlight-color: transparent;
+    }
+    .header .mobile-menu-toggler:active,
+    .header .mobile-menu-toggler:focus-visible,
+    .header .btn-search-icon:active,
+    .header .btn-search-icon:focus-visible,
+    .header .header-right .cart-dropdown > .dropdown-toggle:active,
+    .header .header-right .cart-dropdown > .dropdown-toggle:focus-visible,
+    .header .header-right .cart-dropdown.show > .dropdown-toggle,
+    .header .header-right .ecommerce-guest-login:active,
+    .header .header-right .ecommerce-guest-login:focus-visible {
+        outline: none;
+        background-color: var(--header-action-hover, hsl(var(--primary-h), var(--primary-s), 95%)) !important;
+    }
+    @media (hover: hover) {
+        .header .mobile-menu-toggler:hover,
+        .header .btn-search-icon:hover,
+        .header .header-right .cart-dropdown > .dropdown-toggle:hover,
+        .header .header-right .ecommerce-guest-login:hover {
+            background-color: var(--header-action-hover, hsl(var(--primary-h), var(--primary-s), 95%)) !important;
+        }
+    }
+    .header .mobile-menu-toggler {
+        margin-left: -8px;
+    }
+    .header .mobile-menu-toggler svg {
+        width: 24px;
+        height: 24px;
+    }
+
+    .header .header-left {
+        flex: 1 1 auto;
+        min-width: 0;
+        margin-left: 2px;
+    }
+    .header .header-left .logo {
+        max-width: min(100%, 168px) !important;
+    }
+    .header .header-left .logo img {
+        width: auto;
+        max-width: 100%;
+        max-height: 40px;
+        object-fit: contain;
+    }
+    .header .customlinks {
+        display: none;
+    }
+
+    .header .header-center,
+    .header .header-right {
+        flex: 0 0 auto;
+        gap: 4px;
+        height: auto;
+        margin: 0;
+    }
+    .header .btn-search-icon.mr-3 {
+        margin-right: 0 !important;
+    }
+    .header .btn-search-icon svg {
+        width: 22px;
+        height: 22px;
+        stroke-width: 2.6;
+    }
+    .header .header-right .cart-dropdown {
+        height: auto;
+        margin-left: 0 !important;
+        background: transparent;
+    }
+    .header .header-right .minicart-dropdown > .dropdown-toggle svg {
+        width: 23px;
+        height: 23px;
+    }
+    .header .header-right .minicart-dropdown .cart-count {
+        top: 2px;
+        right: 0;
+        min-width: 18px;
+        height: 18px;
+        margin: 0;
+        padding: 0 5px;
+        font-size: 11px;
+        font-weight: 700;
+        line-height: 18px;
+        text-align: center;
+        border-radius: 9px;
+        box-shadow: 0 0 0 2px var(--header-surface, #fff);
+        transform: none;
+    }
+    .header .header-right .ecommerce-guest-login svg,
+    .header .header-right .user-name-ecommerce .icon-tabler-user-circle {
+        width: 25px;
+        height: 25px;
+    }
+    .header .header-right .cart-dropdown > .dropdown-toggle-ecommerce {
+        border-radius: 50%;
+        background-color: var(--header-action-tint, hsl(var(--primary-h), var(--primary-s), 93%)) !important;
+    }
+    .header .header-right .dropdown-toggle-ecommerce .user-name-ecommerce {
+        color: var(--primary-color);
+    }
+    .header .header-right .user-name-ecommerce .icon-tabler-chevron-down {
+        display: none;
+    }
+}
+</style>
+<div id="search-overlay"></div>
+<div class="header-search-wrapper" id="search-wrapper">
+    <div class="header-dropdown header-dropdown-inside">
+        <img src="{{ asset('images/search.svg') }}" alt="search" class="search-icon">
+        <input
+            placeholder="Buscar..."
+            type="text"
+            class="search_input form-control form-control-lg"
+            id="search-input-field"
+            v-model="value"
+            v-on:keyup="autoComplete"
+            @focus="isFocused = true"
+            @blur="isFocused = false"
+        />
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-x clear-icon" @click="clearInput"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>
+    </div>
+
+    {{-- Mostrar si hay resultados y el input está activo o tiene texto --}}
+    <div class="header-menu results-container" v-show="results.length > 0 && (isFocused || value.length > 0)">
+        <ul class="p-4">
+            <span class="">Productos sugeridos</span>
+            <div class="suggestions-list">
+                <li class="mt-2 py-2" v-for="result in results">
+                    <div class="row mx-0">
+                        <a :href="'/ecommerce/item/' + result.slug" class="d-flex col-7 px-0" @click="suggestionClick(result)">
+                            <img style="max-width: 80px" class="img-product-results" :src="result.image_url_small" alt="">
+                            <span class="search_title d-flex align-items-end ml-3" style="font-size: 1.0em;"> @{{ result.description }} </span>
+                        </a>
+                        <div class="col-5 px-0 d-flex justify-content-between align-items-center">
+                            <span v-if="showPrices">@{{ result.sale_unit_price }}</span>
+                            <span v-else></span>
+                            <div>
+                                <button class="btn-add-cart btn-success" v-if="!getCartQuantity(result.id)" @click.stop.prevent="addToCart(result)">
+                                    Agregar al carrito
+                                </button>
+                                <div class="quantity-container d-flex align-items-center" v-if="getCartQuantity(result.id)">
+                                    <button v-if="cartQuantities[result.id] <= 1" @click.stop.prevent="removeFromCart(result)">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                    </button>
+                                    <button v-if="cartQuantities[result.id] > 1" @click.stop.prevent="decrementQuantity(result)">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-minus"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M5 12l14 0" /></svg>
+                                    </button>
+                                    <input type="number" class="input-quantity mx-2" v-model.number="cartQuantities[result.id]" min="1" style="width: 50px; text-align: center;" @change="updateQuantity(result)">
+                                    <button @click.stop.prevent="incrementQuantity(result)">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-plus"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 5l0 14" /><path d="M5 12l14 0" /></svg>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </li>
+            </div>
+        </ul>
+    </div>
+    <div class="header-menu results-container" v-show="value.length > 0 && results.length === 0 && isFocused">
+        <div style="padding: 16px; text-align: center; color: #888;">
+            <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="#ccc" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="display:block; margin: 0 auto 8px;">
+                <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                <path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/>
+                <path d="M21 21l-6 -6"/>
+            </svg>
+            <span style="font-size: 0.9em;">No se encontraron resultados para <strong>"@{{ value }}"</strong></span>
+        </div>
+    </div>
+</div>
+<header class="header">
+    <div class="header-middle">
+        <div class="container">
+            <button class="mobile-menu-toggler" type="button" aria-label="Abrir menú">
+                <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16"/><path d="M4 12h16"/><path d="M4 17h16"/></svg>
+            </button>
+
+            <div class="header-left">
+                <a href="{{ route("tenant.ecommerce.index") }}" class="logo" style="max-width: 180px">
+                    @php
+                        $headerPrefs = optional(\App\Models\Tenant\ConfigurationEcommerce::first())->preferences;
+                        if (is_string($headerPrefs)) {
+                            $headerPrefs = json_decode($headerPrefs, true);
+                        }
+                        $headerTheme = data_get($headerPrefs, 'header_theme', 'light');
+                        $headerLogoDark = data_get($company ?? null, 'logo_dark');
+                        $headerLogo = ($headerTheme === 'dark' && $headerLogoDark)
+                            ? $headerLogoDark
+                            : (data_get($company ?? null, 'logo') ?: data_get($information ?? null, 'logo'));
+                    @endphp
+                    @if($headerLogo)
+                        <img src="{{ asset('storage/uploads/logos/'.$headerLogo) }}" alt="Logo" />
+                    @else
+                        <img src="{{asset('logo/tulogo.png')}}" alt="Logo" />
+                    @endif
+                </a>
+            </div>
+
+            <div class="category-dropdown" id="category-dropdown">
+                <button type="button" class="category-dropdown-toggle" id="category-toggle" @if(count($categories) == 0) style="cursor: default; pointer-events: none;" @else aria-haspopup="true" aria-controls="category-menu" aria-expanded="false" @endif>
+                    <span>Categorías</span>
+
+                    @if(count($categories) > 0)
+                    <svg class="category-arrow" xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path d="M6 9l6 6l6 -6" />
+                    </svg>
+                    @endif
+                </button>
+
+                @if(count($categories) > 0)
+                @php($headerCategorySlug = request()->route('category'))
+                <div class="category-menu" id="category-menu">
+                    <ul class="category-menu-list">
+                        @foreach ($categories as $category)
+                            @php($categorySlug = \Illuminate\Support\Str::slug($category->name, '-'))
+                            <li>
+                                <a href="{{ route('tenant.ecommerce.category', $categorySlug) }}" class="category-item {{ $headerCategorySlug == $categorySlug ? 'is-active' : '' }}" @if($headerCategorySlug == $categorySlug) aria-current="page" @endif>
+                                    <span class="category-item-title" title="{{ $category->name }}">{{ $category->name }}</span>
+                                    <svg class="category-item-chevron" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 6 6 6-6 6"/></svg>
+                                </a>
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+                @endif
+            </div>
+            @php($customLinks = $customLinks ?? \App\Models\Tenant\ConfigurationEcommerce::getCustomLinks())
+            {{-- Bajo 992px estos enlaces se ocultan y pasan al menú lateral (mobile_menu) --}}
+            <div class="customlinks">
+                @foreach (['one', 'two', 'three'] as $customLinkKey)
+                    @if(!empty($customLinks['title_'.$customLinkKey]) && !empty($customLinks['link_'.$customLinkKey]))
+                        <a href="{{ $customLinks['link_'.$customLinkKey] }}" target="_blank">{{ $customLinks['title_'.$customLinkKey] }}</a>
+                    @endif
+                @endforeach
+            </div>
+
+            <div id="header_bar" class="header-center header-dropdowns">
+
+                <!-- Botón lupa -->
+                <button type="button" class="mr-3 btn-search-icon" id="btn-search-icon" aria-label="Buscar productos">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                        <path stroke="none" d="M0 0h24v24H0z" fill="none"/>
+                        <path d="M3 10a7 7 0 1 0 14 0a7 7 0 1 0 -14 0"/>
+                        <path d="M21 21l-6 -6"/>
+                    </svg>
+                </button>
+
+                <!-- Wrapper del buscador (posición absoluta centrada) -->
+
+            </div>
+
+            <div class="header-right">
+                @include('ecommerce::layouts.partials_ecommerce.cart_dropdown')
+                @include('ecommerce::partials.headers.session')
+            </div>
+        </div>
+    </div>
+
+    <div class="header-bottom sticky-header">
+        <div class="container d-flex">
+            <nav class="main-nav flex-grow-1"></nav>
+        </div>
+    </div>
+</header>
+
+<script>
+(function() {
+
+    document.body.addEventListener('click', function(e) {
+        var overlay = document.getElementById('search-overlay');
+        var wrapper = document.getElementById('search-wrapper');
+        var isOpen  = wrapper && wrapper.classList.contains('active');
+
+        if (e.target.closest('#btn-search-icon')) {
+            if (isOpen) {
+                wrapper.classList.remove('active');
+                overlay.classList.remove('active');
+            } else {
+                wrapper.classList.add('active');
+                overlay.classList.add('active');
+                var input = wrapper.querySelector('input');
+                if (input) setTimeout(function(){ input.focus(); }, 80);
+            }
+            return;
+        }
+
+        if (e.target.id === 'search-overlay') {
+            wrapper.classList.remove('active');
+            overlay.classList.remove('active');
+            return;
+        }
+    });
+
+    document.addEventListener('keydown', function(e) {
+        if (e.key === 'Escape') {
+            var overlay = document.getElementById('search-overlay');
+            var wrapper = document.getElementById('search-wrapper');
+            if (wrapper) wrapper.classList.remove('active');
+            if (overlay) overlay.classList.remove('active');
+        }
+    });
+
+    function waitForVue(cb) {
+        if (typeof Vue !== 'undefined') return cb();
+        setTimeout(function(){ waitForVue(cb); }, 100);
+    }
+
+    (function() {
+        var categoryDropdown = document.getElementById('category-dropdown');
+        var categoryToggle = document.getElementById('category-toggle');
+
+        if (categoryDropdown && categoryToggle) {
+            function setCategoryMenuOpen(isOpen) {
+                categoryDropdown.classList.toggle('active', isOpen);
+                categoryToggle.setAttribute('aria-expanded', isOpen ? 'true' : 'false');
+            }
+
+            categoryToggle.addEventListener('click', function(e) {
+                e.preventDefault();
+                e.stopPropagation();
+                setCategoryMenuOpen(!categoryDropdown.classList.contains('active'));
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!categoryDropdown.contains(e.target)) {
+                    setCategoryMenuOpen(false);
+                }
+            });
+
+            document.addEventListener('keydown', function(e) {
+                if (e.key === 'Escape' && categoryDropdown.classList.contains('active')) {
+                    setCategoryMenuOpen(false);
+                    categoryToggle.focus();
+                }
+            });
+        }
+    })();
+
+    waitForVue(function() {
+
+        // ✅ Vue montado en #search-wrapper, no en #header_bar
+        if (document.getElementById('search-wrapper')) {
+            new Vue({
+                el: '#search-wrapper',
+                data: {
+                    value: '',
+                    isFocused: false,
+                    suggestions: [],
+                    resource: 'ecommerce',
+                    results: [],
+                    cartQuantities: {},
+                    showPrices: window.__storefront_show_prices !== false && window.__storefront_show_prices !== 0,
+                },
+                created() {
+                    this.getItems();
+                    this.loadCartQuantities();
+                    window.addEventListener('productAddedToCart', this.loadCartQuantities);
+                },
+                methods: {
+                    clearInput() {
+                        this.value = '';
+                        this.results = [];
+                        var wrapper = document.getElementById('search-wrapper');
+                        var overlay = document.getElementById('search-overlay');
+                        if (wrapper) wrapper.classList.remove('active');
+                        if (overlay) overlay.classList.remove('active');
+                    },
+                    autoComplete() {
+                        if (this.value) {
+                            var val = this.value.toUpperCase();
+                            this.results = this.suggestions.filter(function(obj) {
+                                var desc = obj.description.toUpperCase();
+                                var id = obj.internal_id ? obj.internal_id.toUpperCase() : '';
+                                return desc.includes(val) || id.includes(val);
+                            });
+                        } else {
+                            this.results = [];
+                        }
+                    },
+                    getItems() {
+                        var ctx = this;
+                        fetch('/' + this.resource + '/items_bar')
+                            .then(function(r){ return r.json(); })
+                            .then(function(json){ ctx.suggestions = json.data; });
+                    },
+                    suggestionClick(item) {
+                        this.results = [];
+                        this.value = item.description;
+                    },
+                    addToCart(item) {
+                        var imageSmall = 'imagen-no-disponible.jpg';
+                        if (item.image_url_small) {
+                            imageSmall = item.image_url_small.split(/[\\/]/).pop();
+                        }
+
+                        let priceClean = item.sale_unit_price;
+                        if (typeof priceClean === 'string') {
+                            priceClean = priceClean.replace(/[^\d.,-]/g, '').replace(',', '.');
+                        }
+                        priceClean = parseFloat(priceClean) || 0;
+
+                        const cartItem = {
+                            id: item.id,
+                            description: item.description,
+                            sale_unit_price: priceClean,
+                            original_price: priceClean,
+                            sale_unit_price_display: item.sale_unit_price,
+                            image_small: imageSmall,
+                            image: imageSmall,
+                            sale_affectation_igv_type_id: item.sale_affectation_igv_type_id || '10',
+                            currency_type_id: item.currency_type_id || 'PEN',
+                            currency_type_symbol: item.currency_type_symbol || 'S/',
+                            unit_type_id: item.unit_type_id || 'NIU',
+                            internal_id: item.internal_id || '',
+                            quantity: 1,
+                            stock: item.stock != null ? parseInt(item.stock, 10) : undefined,
+                        };
+
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        const found = array.some(x => x.id == item.id);
+
+                        if (typeof cartAddOrUpdateItem === 'function') {
+                            cartAddOrUpdateItem(cartItem, {
+                                quantity: 1,
+                                mode: found ? 'exists' : 'added',
+                            });
+                            return;
+                        }
+
+                        if (!found) {
+                            array.push(cartItem);
+                            localStorage.setItem('products_cart', JSON.stringify(array));
+                            this.cartQuantities = Object.assign({}, this.cartQuantities, { [item.id]: 1 });
+                            window.dispatchEvent(new Event('productAddedToCart'));
+                        }
+                    },
+                    getCartQuantity(id) {
+                        return this.cartQuantities[id] || 0;
+                    },
+                    loadCartQuantities() {
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        let obj = {};
+                        array.forEach(function(item) {
+                            obj[item.id] = item.quantity || 1;
+                        });
+                        this.cartQuantities = obj;
+                    },
+                    incrementQuantity(item) {
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        let found = array.find(x => x.id == item.id);
+                        if (found) {
+                            found.quantity = (found.quantity || 1) + 1;
+                            localStorage.setItem('products_cart', JSON.stringify(array));
+                            this.cartQuantities[item.id] = found.quantity;
+                            window.dispatchEvent(new Event('productAddedToCart'));
+                        }
+                    },
+                    decrementQuantity(item) {
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        let found = array.find(x => x.id == item.id);
+                        if (found && found.quantity > 1) {
+                            found.quantity--;
+                            localStorage.setItem('products_cart', JSON.stringify(array));
+                            this.cartQuantities[item.id] = found.quantity;
+                            window.dispatchEvent(new Event('productAddedToCart'));
+                        } else if (found && found.quantity <= 1) {
+                            this.removeFromCart(item);
+                        }
+                    },
+                    updateQuantity(item) {
+                        let qty = parseInt(this.cartQuantities[item.id]) || 1;
+                        if (qty < 1) qty = 1;
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        let found = array.find(x => x.id == item.id);
+                        if (found) {
+                            found.quantity = qty;
+                            localStorage.setItem('products_cart', JSON.stringify(array));
+                            this.cartQuantities[item.id] = qty;
+                            window.dispatchEvent(new Event('productAddedToCart'));
+                        }
+                    },
+                    removeFromCart(item) {
+                        let array = localStorage.getItem('products_cart');
+                        array = array ? JSON.parse(array) : [];
+                        array = array.filter(x => x.id != item.id);
+                        localStorage.setItem('products_cart', JSON.stringify(array));
+                        this.$set(this.cartQuantities, item.id, 0);
+                        window.dispatchEvent(new Event('productAddedToCart'));
+                    }
+                }
+            });
+        }
+
+    });
+
+})();
+</script>

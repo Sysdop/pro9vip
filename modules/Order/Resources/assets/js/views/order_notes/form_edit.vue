@@ -1,0 +1,1055 @@
+<template>
+    <div class="card mb-0 pt-2 pt-md-0">
+        <!-- <div class="card-header bg-info">
+            <h3 class="my-0">Nuevo Comprobante</h3>
+        </div> -->
+        <div class="tab-content-default row-new" v-if="loading_form">
+            <div class="invoice">
+                <header class="clearfix">
+                    <div class="row">
+                        <div class="col-sm-2 text-center mt-3 mb-0">
+                            <logo url="/" :path_logo="(company.logo != null) ? `/storage/uploads/logos/${company.logo}` : ''" ></logo>
+                        </div>
+                        <div class="col-sm-10 text-left mt-3 mb-0">
+                            <address class="ib mr-2" >
+                                <span class="font-weight-bold d-block">PEDIDO</span>
+                                <span class="font-weight-bold d-block">PD-XXX</span>
+                                <span class="font-weight-bold">{{company.name}}</span>
+                                <br>
+                                <div v-if="establishment.address != '-'">{{ establishment.address }}, </div> {{ establishment.district.description }}, {{ establishment.province.description }}, {{ establishment.department.description }} - {{ establishment.country.description }}
+                                <br>
+                                {{establishment.email}} - <span v-if="establishment.telephone != '-'">{{establishment.telephone}}</span>
+                            </address>
+                        </div>
+                    </div>
+                </header>
+                <form autocomplete="off" @submit.prevent="submit">
+                    <div class="form-body">
+                        <div class="row mt-1">
+                             <div class="col-lg-6 pb-2">
+                                <div class="form-group" :class="{'has-danger': errors.customer_id}">
+                                    <label class="control-label font-weight-bold text-info">
+                                        Cliente
+                                        <a href="#" @click.prevent="showDialogNewPerson = true">[+ Nuevo]</a>
+                                    </label>
+                                    <el-select v-model="form.customer_id" filterable remote class="border-left rounded-left border-info" popper-class="el-select-customers"
+                                        dusk="customer_id"
+                                        placeholder="Escriba el nombre o número de documento del cliente"
+                                        :remote-method="searchRemoteCustomers"
+                                        :loading="loading_search"
+                                        @change="changeCustomer"
+                                        @keyup.enter.native="keyupCustomer">
+
+                                        <el-option v-for="option in customers" :key="option.id" :value="option.id" :label="option.description"></el-option>
+
+                                    </el-select>
+                                    <small class="form-control-feedback" v-if="errors.customer_id" v-text="errors.customer_id[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.date_of_issue}">
+                                    <!--<label class="control-label">Fecha de emisión</label>-->
+                                    <label class="control-label">Fec. Emisión</label>
+                                    <el-date-picker v-model="form.date_of_issue" type="date" value-format="yyyy-MM-dd" :clearable="false" @change="changeDateOfIssue"></el-date-picker>
+                                    <small class="form-control-feedback" v-if="errors.date_of_issue" v-text="errors.date_of_issue[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.date_of_due}">
+                                    <label class="control-label">Fec. Vencimiento</label>
+                                    <el-date-picker v-model="form.date_of_due" type="date" value-format="yyyy-MM-dd" :clearable="true"></el-date-picker>
+                                    <small class="form-control-feedback" v-if="errors.date_of_due" v-text="errors.date_of_due[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.delivery_date}">
+                                    <label class="control-label">Fec. Entrega</label>
+                                    <el-date-picker v-model="form.delivery_date" type="date" value-format="yyyy-MM-dd" :clearable="true"></el-date-picker>
+                                    <small class="form-control-feedback" v-if="errors.delivery_date" v-text="errors.delivery_date[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-6">
+                                <div class="form-group">
+                                    <label class="control-label">Dirección de envío
+                                    </label>
+                                    <el-input v-model="form.shipping_address"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.shipping_address"
+                                           v-text="errors.shipping_address[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-3">
+                                <div class="form-group form-seller">
+                                    <label class="control-label">Vendedor</label>
+                                    <el-select
+                                        v-model="form.seller_id"
+                                        filterable
+                                        clearable
+                                        :disabled="typeUser === 'seller'"
+                                    >
+                                        <el-option
+                                            v-for="sel in sellers"
+                                            :key="sel.id"
+                                            :value="sel.id"
+                                            :label="sel.name"
+                                        ></el-option>
+                                    </el-select>
+                                    <small class="form-control-feedback" v-if="errors.seller_id"
+                                           v-text="errors.seller_id[0]"></small>
+                                </div>
+                            </div>
+
+                            <!-- <div class="col-lg-6">
+                                <div class="form-group" :class="{'has-danger': errors.exchange_rate_sale}">
+                                    <label class="control-label">Descripcion
+                                    </label>
+                                    <el-input  type="textarea"  :rows="3" v-model="form.description"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.description" v-text="errors.description[0]"></small>
+                                </div>
+                            </div> -->
+
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.payment_method_type_id}">
+                                    <label class="control-label">
+                                        Término de pago
+                                    </label>
+                                    <el-select v-model="form.payment_method_type_id" filterable @change="changePaymentMethodType">
+                                        <el-option v-for="option in payment_method_types" :key="option.id" :value="option.id" :label="option.description"></el-option>
+                                    </el-select>
+                                    <small class="form-control-feedback" v-if="errors.payment_method_type_id" v-text="errors.payment_method_type_id[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.currency_type_id}">
+                                    <label class="control-label">Moneda</label>
+                                    <el-select v-model="form.currency_type_id" @change="changeCurrencyType">
+                                        <el-option v-for="option in currency_types" :key="option.id" :value="option.id" :label="option.description"></el-option>
+                                    </el-select>
+                                    <small class="form-control-feedback" v-if="errors.currency_type_id" v-text="errors.currency_type_id[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-lg-2">
+                                <div class="form-group" :class="{'has-danger': errors.exchange_rate_sale}">
+                                    <label class="control-label">Tipo de cambio
+                                        <el-tooltip class="item" effect="dark" content="Tipo de cambio del día, extraído de SUNAT" placement="top-end">
+                                            <i class="fa fa-info-circle"></i>
+                                        </el-tooltip>
+                                    </label>
+                                    <el-input v-model="form.exchange_rate_sale"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.exchange_rate_sale" v-text="errors.exchange_rate_sale[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-lg-6">
+                                <div class="form-group" :class="{'has-danger': errors.observation}">
+                                    <label class="control-label">Observación
+                                    </label>
+                                    <el-input type="textarea" :rows="3" v-model="form.observation"></el-input>
+                                    <small class="form-control-feedback" v-if="errors.observation"
+                                           v-text="errors.observation[0]"></small>
+                                </div>
+                            </div>
+
+
+                            <div class="col-lg-6">
+                                <div class="form-group">
+                                    <label class="control-label">Datos adicionales</label>
+                                </div>
+                                
+                                <table class="table table-responsive table-bordered">
+                                    <thead>
+                                        <tr width="100%">
+                                            <template v-if="form.additional_data.length > 0">
+                                                <th class="pb-2" width="40%">Título</th>
+                                                <th class="pb-2" width="40%">Descripción</th>
+                                            </template>
+                                            <th :width="form.additional_data.length > 0 ? '20%':'5%'"><a href="#" @click.prevent="clickAddAdditionalData" class="text-center font-weight-bold text-info">[+ Agregar]</a></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(row, index) in form.additional_data" :key="index" width="100%">
+                                            <td>
+                                                <div class="form-group mb-2 mr-2">
+
+                                                    <el-input v-model="row.title"></el-input>
+                                                    
+                                                    <template v-if="errors[`additional_data.${index}.title`]">
+                                                        <div class="form-group" :class="{'has-danger': errors[`additional_data.${index}.title`]}">
+                                                            <small class="form-control-feedback" v-text="errors[`additional_data.${index}.title`][0]"></small>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="form-group mb-2 mr-2">
+                                                    
+                                                    <el-input v-model="row.description"></el-input>
+                                                    
+                                                    <template v-if="errors[`additional_data.${index}.description`]">
+                                                        <div class="form-group" :class="{'has-danger': errors[`additional_data.${index}.description`]}">
+                                                            <small class="form-control-feedback" v-text="errors[`additional_data.${index}.description`][0]"></small>
+                                                        </div>
+                                                    </template>
+                                                </div>
+                                            </td>
+                                            <td class="series-table-actions text-center">
+                                                <button  type="button" class="btn btn-xs btn-danger btn-shad" @click.prevent="clickDeleteAdditionalData(index)">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                </button>
+                                            </td>
+                                            <br>
+                                        </tr>
+                                    </tbody>
+                                </table>
+
+                            </div>
+                            
+                        </div>
+
+                        <div class="row mt-2">
+                            <div class="col-md-12">
+                                <div class="table-responsive">
+                                    <table class="table">
+                                        <thead>
+                                            <tr>
+                                                <th width="0.5%"></th>
+                                                <th class="font-weight-bold"
+                                                    width="30%">Descripción</th>
+                                                <th width="8%" class="text-center font-weight-bold">Unidad</th>
+                                                <th width="8%" class="text-center font-weight-bold">Cantidad</th>
+                                                <th class="text-center font-weight-bold">Precio Unitario</th>
+                                                <th class="text-center font-weight-bold">Subtotal</th>
+                                                <!--<th class="text-right font-weight-bold">Cargo</th>-->
+                                                <th class="text-center font-weight-bold">Total</th>
+                                                <th width="8%"></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody v-if="form.items.length > 0">
+                                            <tr v-for="(row, index) in form.items" :key="index">
+                                                <td></td>
+                                                <td>
+                                                    {{row.item.description}}
+                                                    <template v-if="row.item.presentation">
+                                                        {{row.item.presentation.hasOwnProperty('description') ? row.item.presentation.description : ''}}<br/><small>{{row.affectation_igv_type.description}}</small>
+                                                    </template>
+                                                </td>
+                                                <td class="text-center">{{ row.item.unit_type_label || row.item.unit_type_id }}</td>
+                                                <td class="text-center">{{row.quantity}}</td>
+                                                <!-- <td class="text-right">{{currency_type.symbol}} {{row.unit_price}}</td> -->
+                                                <td class="text-center">{{ currency_type.symbol }} {{ formatDecimal(getFormatUnitPriceRow(row.unit_price)) }}</td>
+
+                                                <td class="text-center">{{currency_type.symbol}} {{formatDecimal(row.total_value)}}</td>
+                                                <!--<td class="text-right">{{ currency_type.symbol }} {{ row.total_charge }}</td>-->
+                                                <td class="text-center">{{currency_type.symbol}} {{formatDecimal(row.total)}}</td>
+                                                <td class="text-center">
+                                                    <button
+                                                        class="btn btn-xs btn-info btn-shad"
+                                                        type="button"
+                                                        @click="clickEditItem(row, index)"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-edit"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M7 7h-1a2 2 0 0 0 -2 2v9a2 2 0 0 0 2 2h9a2 2 0 0 0 2 -2v-1" /><path d="M20.385 6.585a2.1 2.1 0 0 0 -2.97 -2.97l-8.415 8.385v3h3l8.385 -8.415" /><path d="M16 5l3 3" /></svg>
+                                                    </button>
+                                                    <button
+                                                        type="button"
+                                                        class="btn btn-xs btn-danger btn-shad ms-1"
+                                                        @click.prevent="clickRemoveItem(index)"
+                                                    >
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                    </button>
+
+                                                </td>
+                                            </tr>
+                                            <tr><td colspan="8"></td></tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                            <div class="col-lg-12 col-md-6 d-flex flex-column align-items-start mt-0">
+                                <div class="pb-2">
+                                    <button type="button" class="btn btn-primary" @click.prevent="showDialogAddItem = true">+ Agregar Producto</button>
+                                </div>
+                                <div v-if="form.items.length > 0" class="total-rows">
+                                    <span>Total de ítems: {{ form.items.length }}</span>
+                                </div>
+                            </div>
+
+                            <div class="col-md-8 mt-3">
+
+                            </div>
+
+                            <!-- text-end (Bootstrap 5): text-right ya no existe y dejaba los totales a la izquierda -->
+                            <div class="col-md-4">
+                                <p class="text-end" v-if="form.total_exportation > 0">OP.EXPORTACIÓN: {{ currency_type.symbol }} {{ formatDecimal(form.total_exportation) }}</p>
+                                <p class="text-end" v-if="form.total_free > 0">OP.GRATUITAS: {{ currency_type.symbol }} {{ formatDecimal(form.total_free) }}</p>
+                                <p class="text-end" v-if="form.total_unaffected > 0">OP.INAFECTAS: {{ currency_type.symbol }} {{ formatDecimal(form.total_unaffected) }}</p>
+                                <p class="text-end" v-if="form.total_exonerated > 0">OP.EXONERADAS: {{ currency_type.symbol }} {{ formatDecimal(form.total_exonerated) }}</p>
+                                <p class="text-end" v-if="form.total_taxed > 0">OP.GRAVADA: {{ currency_type.symbol }} {{ formatDecimal(form.total_taxed) }}</p>
+                                <p class="text-end" v-if="form.total_igv > 0">IGV: {{ currency_type.symbol }} {{ formatDecimal(form.total_igv) }}</p>
+                                <p class="text-end" v-if="form.subtotal > 0 && totalDiscount > 0">SUBTOTAL: {{ currency_type.symbol }} {{ formatDecimal(form.subtotal) }}</p>
+                                <p class="text-end" v-if="totalDiscount > 0">DESCUENTOS TOTALES: {{ currency_type.symbol }} {{ formatDecimal(totalDiscount) }}</p>
+                                <h3 class="text-end" v-if="form.total > 0"><b>TOTAL A PAGAR: </b>{{ currency_type.symbol }} {{ formatDecimal(form.total) }}</h3>
+                            </div>
+
+                            <!-- pago: igual que en el formulario de creación -->
+                            <div class="p-2 payment-container col-12 col-lg-8 ms-auto" v-if="showPayments">
+                                <label class="control-label">
+                                    Pagos referenciales
+                                    <el-tooltip class="item" effect="dark" placement="top">
+                                        <div slot="content">
+                                            Los pagos son referenciales para el pedido, no afectan flujos de caja, entre otros.<br />
+                                            Sirven para autocompletar la información al convertirlo a CPE o Nota de venta.
+                                        </div>
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <table>
+                                    <thead>
+                                        <tr width="100%">
+                                            <th v-if="form.prepayments.length > 0">M. Pago</th>
+                                            <th v-if="form.prepayments.length > 0">Destino</th>
+                                            <th v-if="form.prepayments.length > 0">Referencia</th>
+                                            <th v-if="form.prepayments.length > 0">Monto</th>
+                                            <th width="15%">
+                                                <a href="#" @click.prevent="clickAddPayment" class="text-center font-weight-bold text-info">[+ Agregar]</a>
+                                            </th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr v-for="(row, index) in form.prepayments" :key="index">
+                                            <td>
+                                                <div class="form-group mb-2 me-2">
+                                                    <el-select v-model="row.payment_method_type_id">
+                                                        <el-option v-for="option in payment_method_types" :key="option.id" :value="option.id" :label="option.description"></el-option>
+                                                    </el-select>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="form-group mb-2 me-2">
+                                                    <el-select v-model="row.payment_destination_id" filterable :disabled="row.payment_destination_disabled">
+                                                        <el-option v-for="option in payment_destinations" :key="option.id" :value="option.id" :label="option.description"></el-option>
+                                                    </el-select>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="form-group mb-2 me-2">
+                                                    <el-input v-model="row.reference"></el-input>
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <div class="form-group mb-2 me-2">
+                                                    <el-input v-model="row.payment"></el-input>
+                                                </div>
+                                            </td>
+                                            <td class="series-table-actions text-center">
+                                                <button type="button" class="btn btn-xs btn-danger btn-shad" @click.prevent="clickCancel(index)">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            <!-- final de pago -->
+
+                        </div>
+
+                    </div>
+
+
+                    <div class="form-actions mt-4 footer-card-default gap-2
+                                d-flex flex-column flex-md-row
+                                justify-content-center justify-content-md-between
+                                align-items-stretch align-items-md-center px-4 py-3">
+                        <el-button class="second-buton btn btn-default second-buton-default" @click.prevent="close()">Cancelar</el-button>
+                        <el-button class="btn btn-primary btn-submit-default" type="primary" native-type="submit" :loading="loading_submit" v-if="form.items.length > 0">Guardar cambios</el-button>
+                    </div>
+                </form>
+            </div>
+        </div>
+
+        <order-note-form-item
+            :configuration="configuration"
+            :currency-type-id-active="form.currency_type_id"
+            :exchange-rate-sale="form.exchange_rate_sale"
+            :showDialog.sync="showDialogAddItem"
+            :typeUser="typeUser"
+            :percentage-igv="percentage_igv"
+            :permissionEditItemPrices="authUser.permission_edit_item_prices"
+            :customer-id="form.customer_id"
+            @add="addRow"></order-note-form-item>
+
+        <order-note-form-item-edit
+            :configuration="configuration"
+            :currency-type-id-active="form.currency_type_id"
+            :exchange-rate-sale="form.exchange_rate_sale"
+            :showDialog.sync="showDialogEditItem"
+            :typeUser="typeUser"
+            :percentage-igv="percentage_igv"
+            :permissionEditItemPrices="authUser.permission_edit_item_prices"
+            :recordItem="recordItemEdit"
+            @update="updateRow">
+        </order-note-form-item-edit>
+
+        <person-form :showDialog.sync="showDialogNewPerson"
+                       type="customers"
+                       :external="true"
+                       :input_person="input_person"
+                       :document_type_id = form.document_type_id></person-form>
+
+        <order-note-options :type="type" :showDialog.sync="showDialogOptions"
+                          :recordId="orderNoteNewId"
+                          :showGenerate="false"
+                          :typeUser="typeUser"
+                          :showClose="false"></order-note-options>
+    </div>
+</template>
+
+<script>
+    import OrderNoteFormItem from './partials/item.vue'
+    import OrderNoteFormItemEdit from "./partials/item_edit.vue";
+    import PersonForm from '@views/persons/form.vue'
+    import OrderNoteOptions from './partials/options.vue'
+    import {functions, exchangeRate} from '@mixins/functions'
+    import { decimalQuantity } from '@mixins/decimal-quantity'
+    import {calculateRowItem} from '@helpers/functions'
+    import Logo from '@views/companies/logo.vue'
+
+    export default {
+        components: {OrderNoteFormItem, OrderNoteFormItemEdit, PersonForm, OrderNoteOptions, Logo},
+        props: {
+            'resourceId': {
+                required: true,
+
+                default: 0
+            },
+            'typeUser': {
+                required: true,
+            },
+            'configuration': {},
+            'authUser': {
+                required: true,
+            },
+        },
+        mixins: [functions, exchangeRate, decimalQuantity],
+        computed: {
+            totalDiscount() {
+                // Igual que invoice_generate: los descuentos que afectan la base (00) se muestran con IGV
+                const igv_factor = 1 + this.percentage_igv
+                let total_items = 0;
+
+                (this.form.items || []).forEach(item => {
+                    this.toList(item.discounts).forEach(discount => {
+                        const is_base = discount.discount_type_id === '00'
+                        const base_amount = discount.amount_without_rounded ? discount.amount_without_rounded : discount.amount
+                        total_items += is_base ? base_amount * igv_factor : parseFloat(discount.amount)
+                    })
+                })
+
+                return _.round(total_items, 2)
+            },
+        },
+        data() {
+            return {
+                type:  'edit',
+                input_person: {},
+                resource: 'order-notes',
+                showDialogAddItem: false,
+                showDialogNewPerson: false,
+                showDialogOptions: false,
+                loading_submit: false,
+                loading_form: false,
+                errors: {},
+                form: {},
+                currency_types: [],
+                discount_types: [],
+                total_discount_no_base: 0,
+                charges_types: [],
+                all_customers: [],
+                customers: [],
+                company: null,
+                establishments: [],
+                establishment: null,
+                currency_type: {},
+                orderNoteNewId: null,
+                payment_method_types: [],
+                payment_destinations: [],
+                showPayments: false,
+                sellers: [],
+                activePanel: 0,
+                loading_search:false,
+                showDialogEditItem: false,
+                recordItemEdit: null
+            }
+        },
+        async created() {
+            await this.initForm()
+            await this.$http.get(`/${this.resource}/tables`)
+                .then(async response => {
+                    this.currency_types = response.data.currency_types
+                    this.establishments = response.data.establishments
+                    this.all_customers = response.data.customers
+                    this.discount_types = response.data.discount_types
+                    this.charges_types = response.data.charges_types
+                    this.company = response.data.company
+                    this.form.currency_type_id = (this.currency_types.length > 0)?this.currency_types[0].id:null
+                    this.form.establishment_id = (this.establishments.length > 0)?this.establishments[0].id:null
+                    this.payment_method_types = response.data.payment_method_types
+                    this.payment_destinations = response.data.payment_destinations || []
+                    this.sellers = response.data.sellers || []
+
+                    this.changeEstablishment()
+                    this.changeDateOfIssue()
+                    this.changeCurrencyType()
+                    this.allCustomers()
+                    await this.initRecord()
+
+                })
+            this.loading_form = true
+            this.$eventHub.$on('reloadDataPersons', (customer_id) => {
+                this.reloadDataCustomers(customer_id)
+            })
+            this.$eventHub.$on('initInputPerson', () => {
+                this.initInputPerson()
+            });
+
+        },
+        methods: 
+        {
+            clickEditItem(row, index) {
+                console.log('Abriendo modal de edición', row);
+                this.recordItemEdit = row;
+                this.currentEditIndex = index;
+                this.showDialogEditItem = true;
+                console.log('showDialogEditItem:', this.showDialogEditItem);
+            },
+            updateRow(updatedRow) {
+                // actualizar item en la tabla
+                this.$set(this.form.items, this.currentEditIndex, updatedRow);
+                // Faltaba recalcular: addRow y clickRemoveItem si lo hacen, asi
+                // que al editar precio o cantidad los totales quedaban con el
+                // valor anterior.
+                this.calculateTotal();
+                this.showDialogEditItem = false;
+                this.$message.success('Producto actualizado');
+            },
+            clickAddAdditionalData()
+            {
+                this.form.additional_data.push({
+                    title: null,
+                    description: null,
+                })
+            },
+            clickDeleteAdditionalData(index)
+            {
+                this.form.additional_data.splice(index, 1)
+            },
+            applySellerFromRecord(data) {
+                if (this.typeUser === 'seller' && this.authUser && this.authUser.id) {
+                    this.ensureSellerInList(this.authUser)
+                    this.form.seller_id = this.authUser.id
+                    return
+                }
+
+                const sellerId = data.seller_id || data.user_id || null
+                if (!sellerId) {
+                    return
+                }
+
+                const sellerRef = data.seller
+                    || this.sellers.find(seller => seller.id == sellerId)
+                    || (data.user && data.user.id == sellerId ? data.user : null)
+
+                if (sellerRef) {
+                    this.ensureSellerInList({
+                        id: sellerRef.id,
+                        name: sellerRef.name,
+                    })
+                } else {
+                    this.ensureSellerInList({
+                        id: sellerId,
+                        name: 'Vendedor',
+                    })
+                }
+
+                this.form.seller_id = sellerId
+            },
+            ensureSellerInList(user) {
+                if (!user || !user.id) {
+                    return
+                }
+
+                const exists = this.sellers.some(seller => seller.id == user.id)
+                if (!exists) {
+                    this.sellers.unshift({
+                        id: user.id,
+                        name: user.name || 'Vendedor',
+                    })
+                }
+            },
+            changeCustomer(){
+                this.setAddressByCustomer()
+                let customer = _.find(this.customers, {id : this.form.customer_id})
+
+                if (this.typeUser === 'seller') {
+                    if (this.authUser && this.authUser.id) {
+                        this.ensureSellerInList(this.authUser)
+                        this.form.seller_id = this.authUser.id
+                    }
+                    return
+                }
+
+                if (customer && customer.seller_id) {
+                    const seller = this.sellers.find(element => element.id == customer.seller_id)
+                    if (seller !== undefined) {
+                        this.form.seller_id = seller.id
+                    }
+                }
+            },
+            setAddressByCustomer(){
+
+                let customer = _.find(this.customers, {id : this.form.customer_id})
+
+                if(customer){
+                    this.form.shipping_address = customer.address
+                }
+
+            },
+            async clickDeleteONItem(id, index){
+
+                this.$confirm('¿Desea eliminar el item?', 'Eliminar', {
+                    confirmButtonText: 'Eliminar',
+                    cancelButtonText: 'Cancelar',
+                    type: 'warning'
+                }).then(() => {
+                    this.$http.delete(`/${this.resource}/destroy_order_note_item/${id}`)
+                        .then(res => {
+
+                            if(res.data.success) {
+
+                                this.$message.success(res.data.message)
+                                this.clickRemoveItem(index)
+                                this.$eventHub.$emit('reloadDataItems', null)
+
+                                this.$http.post(`/${this.resource}/update`, this.form).then(response => {
+                                    if (response.data.success) {
+                                        this.isUpdate()
+                                    }
+                                    else {
+                                        this.$message.error(response.data.message);
+                                    }
+                                }).catch(error => {
+                                    if (error.response.status === 422) {
+                                        this.errors = error.response.data;
+                                    }
+                                    else {
+                                        this.$message.error(error.response.data.message);
+                                    }
+                                })
+
+                            }else{
+                                this.$message.error(res.data.message)
+                            }
+
+                        })
+                        .catch(error => {
+                            if (error.response.status === 500) {
+                                this.$message.error('Error al intentar eliminar');
+                            } else {
+                                console.log(error.response.data.message)
+                            }
+                        })
+                }).catch(error => {
+                    console.log(error)
+                });
+
+
+            },
+            async isUpdate(){
+                if (this.resourceId) {
+                    await this.$http.get(`/${this.resource}/record2/${this.resourceId}`)
+                        .then(response => {
+                            this.form = response.data.data.order_note;
+                            this.form.items = this.normalizeItems(this.form.items)
+                            this.form.prepayments = this.toList(this.form.prepayments)
+                        })
+                }
+            },
+            getFormatUnitPriceRow(unit_price){
+                return _.round(unit_price, 6)
+                // return unit_price.toFixed(6)
+            },
+            async changePaymentMethodType(flag_submit = true){
+                let payment_method_type = await _.find(this.payment_method_types, {'id':this.form.payment_method_type_id})
+                if(payment_method_type){
+
+                    if(payment_method_type.number_days){
+                        this.form.date_of_issue =  moment().add(payment_method_type.number_days,'days').format('YYYY-MM-DD');
+                        this.changeDateOfIssue()
+                    }
+                    // else{
+                    //     if(flag_submit){
+                    //         this.form.date_of_issue = moment().format('YYYY-MM-DD')
+                    //         this.changeDateOfIssue()
+                    //     }
+                    // }
+                }
+            },
+            async initRecord() {
+                await this.$http.get(`/${this.resource}/record/${this.resourceId}` )
+                    .then(response => {
+                        let data = response.data.data.order_note
+                        this.form.id = data.id
+                        this.form.establishment_id = data.establishment_id
+                        this.form.customer_id = data.customer_id
+                        this.form.currency_type_id = data.currency_type_id
+                        this.form.payment_method_type_id = data.payment_method_type_id
+                        this.form.date_of_due = data.date_of_due
+                        this.form.date_of_issue = data.date_of_issue
+                        this.form.delivery_date = data.delivery_date
+                        this.form.exchange_rate_sale = data.exchange_rate_sale
+                        this.form.description = data.description
+                        this.form.shipping_address = data.shipping_address
+                        this.form.items = this.normalizeItems(data.items)
+                        this.form.observation = data.observation
+                        this.form.additional_data = this.prepareAdditionalData(data)
+                        this.applySellerFromRecord(data)
+                        this.calculateTotal()
+                        // después de calculateTotal: al cargar se respetan los montos guardados
+                        // (calculateTotal reparte el total entre los pagos cuando cambian los ítems)
+                        this.form.prepayments = this.toList(data.prepayments)
+                        this.updateEmptyPaymentDestinations()
+                        this.showPayments = this.form.items.length > 0
+                        this.reloadDataCustomers(this.form.customer_id)
+                    })
+                await this.getPercentageIgv();
+            },
+            prepareAdditionalData(data)
+            {
+                return data.additional_data ? Object.values(data.additional_data) : []
+            },
+            searchRemoteCustomers(input) {
+
+                if (input.length > 0) {
+                    this.loading_search = true
+                    let parameters = `input=${input}`
+
+                    this.$http.get(`/${this.resource}/search/customers?${parameters}`)
+                            .then(response => {
+                                this.customers = response.data.customers
+                                this.loading_search = false
+                                /* if(this.customers.length == 0){this.allCustomers()} */
+                                this.input_person.number=(this.customers.length==0)? input : null
+                            })
+                } else {
+                    this.allCustomers()
+                    this.input_person.number= null
+                }
+
+            },
+            initForm() {
+                this.errors = {}
+                this.form = {
+                    id: 0,
+                    description: '',
+                    prefix:'PD',
+                    establishment_id: null,
+                    date_of_issue: moment().format('YYYY-MM-DD'),
+                    time_of_issue: moment().format('HH:mm:ss'),
+                    customer_id: null,
+                    currency_type_id: null,
+                    purchase_order: null,
+                    exchange_rate_sale: 0,
+                    total_prepayment: 0,
+                    total_charge: 0,
+                    total_discount: 0,
+                    total_exportation: 0,
+                    total_free: 0,
+                    total_taxed: 0,
+                    total_unaffected: 0,
+                    total_exonerated: 0,
+                    total_igv_free: 0,
+                    total_igv: 0,
+                    total_base_isc: 0,
+                    total_isc: 0,
+                    total_base_other_taxes: 0,
+                    total_other_taxes: 0,
+                    total_taxes: 0,
+                    total_value: 0,
+                    subtotal: 0,
+                    total: 0,
+                    payment_method_type_id:null,
+                    operation_type_id: null,
+                    date_of_due: moment().format('YYYY-MM-DD'),
+                    delivery_date: null,
+                    items: [],
+                    charges: [],
+                    discounts: [],
+                    attributes: [],
+                    guides: [],
+                    prepayments: [],
+                    shipping_address: null,
+                    seller_id: this.authUser ? this.authUser.id : null,
+                    additional_information:null,
+                    observation: null,
+                    actions: {
+                        format_pdf:'a4',
+                    },
+                    additional_data: [],
+                }
+                this.initInputPerson()
+            },
+            resetForm() {
+                this.activePanel = 0
+                this.initForm()
+                this.form.currency_type_id = (this.currency_types.length > 0)?this.currency_types[0].id:null
+                this.form.establishment_id = (this.establishments.length > 0)?this.establishments[0].id:null
+                this.changeEstablishment()
+                this.changeDateOfIssue()
+                this.changeCurrencyType()
+                this.allCustomers()
+            },
+            changeEstablishment() {
+                this.establishment = _.find(this.establishments, {'id': this.form.establishment_id})
+
+            },
+            cleanCustomer(){
+                this.form.customer_id = null;
+            },
+            async changeDateOfIssue() {
+                this.form.date_of_due = this.form.date_of_issue
+                await this.searchExchangeRateByDate(this.form.date_of_issue).then(response => {
+                    this.form.exchange_rate_sale = response
+                })
+                await this.getPercentageIgv();
+                this.changeCurrencyType();
+            },
+            allCustomers() {
+                this.customers = this.all_customers
+            },
+            addRow(row) {
+                this.form.items.push(JSON.parse(JSON.stringify(row)));
+
+                this.calculateTotal();
+            },
+            clickRemoveItem(index) {
+                this.form.items.splice(index, 1)
+                this.calculateTotal()
+            },
+            changeCurrencyType() {
+                this.currency_type = _.find(this.currency_types, {'id': this.form.currency_type_id})
+                let items = []
+                this.form.items.forEach((row) => {
+                    items.push(calculateRowItem(row, this.form.currency_type_id, this.form.exchange_rate_sale, this.percentage_igv))
+                });
+                this.form.items = items
+                this.calculateTotal()
+            },
+            calculateTotal() {
+
+                let total_discount = 0
+                let total_charge = 0
+                let total_exportation = 0
+                let total_taxed = 0
+                let total_exonerated = 0
+                let total_unaffected = 0
+                let total_free = 0
+                let total_igv = 0
+                let total_value = 0
+                let total = 0
+                let total_igv_free = 0
+                this.total_discount_no_base = 0
+
+                this.form.items.forEach((row) => {
+                    total_discount += parseFloat(row.total_discount)
+                    total_charge += parseFloat(row.total_charge)
+
+                    if (row.affectation_igv_type_id === '10') {
+                        total_taxed += row.total_value_without_rounding ? parseFloat(row.total_value_without_rounding) : parseFloat(row.total_value)
+                    }
+                    if (row.affectation_igv_type_id === '20') {
+                        total_exonerated += row.total_value_without_rounding ? parseFloat(row.total_value_without_rounding) : parseFloat(row.total_value)
+                    }
+                    if (row.affectation_igv_type_id === '30') {
+                        total_unaffected += parseFloat(row.total_value)
+                    }
+                    if (row.affectation_igv_type_id === '40') {
+                        total_exportation += parseFloat(row.total_value)
+                    }
+                    if (['10', '20', '30', '40'].indexOf(row.affectation_igv_type_id) < 0) {
+                        total_free += parseFloat(row.total_value)
+                    }
+                    if (['10', '20', '30', '40'].indexOf(row.affectation_igv_type_id) > -1) {
+                        total_igv += row.total_igv_without_rounding ? parseFloat(row.total_igv_without_rounding) : parseFloat(row.total_igv)
+                        total += row.total_without_rounding ? parseFloat(row.total_without_rounding) : parseFloat(row.total)
+                    }
+                    // total_value += parseFloat(row.total_value)
+
+                    if (!['21', '37'].includes(row.affectation_igv_type_id)) {
+                        total_value += row.total_value_without_rounding ? parseFloat(row.total_value_without_rounding) : parseFloat(row.total_value)
+                    }
+
+                    if (['11', '12', '13', '14', '15', '16'].includes(row.affectation_igv_type_id)) {
+
+                        let unit_value = row.total_value / row.quantity
+                        let total_value_partial = unit_value * row.quantity
+                        row.total_taxes = row.total_value - total_value_partial
+                        row.total_igv = total_value_partial * (row.percentage_igv / 100)
+                        row.total_base_igv = total_value_partial
+                        total_value -= row.total_value
+                        total_igv_free += row.total_igv
+
+                    }
+
+                    // Descuentos que no afectan la base se restan del total (igual que invoice_generate)
+                    this.total_discount_no_base += this.sumDiscountsNoBaseByItem(row)
+
+                });
+
+                let total_all = total - this.total_discount_no_base
+
+                this.form.total_igv_free = _.round(total_igv_free, 2)
+                this.form.total_discount = _.round(total_discount, 2)
+                this.form.total_exportation = _.round(total_exportation, 2)
+                this.form.total_taxed = _.round(total_taxed, 2)
+                this.form.total_exonerated = _.round(total_exonerated, 2)
+                this.form.total_unaffected = _.round(total_unaffected, 2)
+                this.form.total_free = _.round(total_free, 2)
+                this.form.total_igv = _.round(total_igv, 2)
+                this.form.total_value = _.round(total_value, 2)
+                this.form.total_taxes = _.round(total_igv, 2)
+                this.form.subtotal = _.round(total, 2)
+                this.form.total = _.round(total_all, 2)
+
+                // Igual que en creación: el pago referencial sigue al total del pedido
+                const prepayments = this.toList(this.form.prepayments)
+                if (prepayments.length > 0) {
+                    prepayments.forEach(payment => {
+                        payment.payment = this.form.total / prepayments.length
+                    })
+                }
+
+                this.showPayments = this.form.items.length > 0
+             },
+            clickCancel(index) {
+                this.form.prepayments.splice(index, 1)
+            },
+            clickAddPayment() {
+                this.form.prepayments.push({
+                    id: null,
+                    document_id: null,
+                    date_of_payment: moment().format('YYYY-MM-DD'),
+                    payment_method_type_id: '10',
+                    payment_destination_id: this.payment_destinations.length > 0 ? this.payment_destinations[0].id : null,
+                    reference: null,
+                    payment: this.form.total && this.form.total > 0 ? this.form.total : 0
+                })
+                this.showPayments = true
+            },
+            updateEmptyPaymentDestinations() {
+                if (this.payment_destinations && this.payment_destinations.length > 0) {
+                    const defaultDestinationId = this.payment_destinations[0].id
+                    this.form.prepayments.forEach(payment => {
+                        if (!payment.payment_destination_id) {
+                            payment.payment_destination_id = defaultDestinationId
+                        }
+                    })
+                }
+            },
+            sumDiscountsNoBaseByItem(row) {
+                return _.sumBy(this.toList(row.discounts), discount => {
+                    return discount.discount_type_id == '01' ? parseFloat(discount.amount) : 0
+                })
+            },
+            /**
+             * El backend serializa discounts/charges/attributes como objeto ({} o {"0": {...}})
+             * porque el modelo los castea con (object) json_decode; el formulario los trabaja como arreglo.
+             */
+            toList(value) {
+                if (Array.isArray(value)) return value
+                if (value && typeof value === 'object') return Object.values(value)
+                return []
+            },
+            normalizeItems(items) {
+                return this.toList(items).map(row => {
+                    row.discounts = this.toList(row.discounts)
+                    row.charges = this.toList(row.charges)
+                    row.attributes = this.toList(row.attributes)
+                    return row
+                })
+            },
+            async submit() {
+                // await this.changePaymentMethodType(false)
+
+                if(this.form.date_of_issue > this.form.date_of_due)
+                    return this.$message.error('La fecha de emisión no puede ser posterior a la de vencimiento');
+
+                if(this.form.date_of_issue > this.form.delivery_date)
+                    return this.$message.error('La fecha de emisión no puede ser posterior a la de entrega');
+
+                this.loading_submit = true
+                await this.$http.post(`/${this.resource}/update`, this.form).then(response => {
+                    if (response.data.success) {
+                        this.resetForm();
+                        this.orderNoteNewId = response.data.data.id;
+                        this.$message.success('Se guardaron los cambios correctamente.')
+                         this.showDialogOptions = true;
+                    }
+                    else {
+                        this.$message.error(response.data.message);
+                    }
+                }).catch(error => {
+                    if (error.response.status === 422) {
+                        this.errors = error.response.data;
+                    }
+                    else {
+                        this.$message.error(error.response.data.message);
+                    }
+                }).then(() => {
+                    this.loading_submit = false;
+                });
+            },
+            close() {
+                location.href = `/${this.resource}`
+            },
+            reloadDataCustomers(customer_id) {
+                this.$http.get(`/${this.resource}/search/customer/${customer_id}`).then((response) => {
+                    this.customers = response.data.customers
+                    this.form.customer_id = customer_id
+                    this.setAddressByCustomer()
+                })
+            },
+            keyupCustomer() {
+
+                if (this.input_person.number) {
+
+                    if (!isNaN(parseInt(this.input_person.number))) {
+
+                        switch (this.input_person.number.length) {
+                            case 8:
+                                this.input_person.identity_document_type_id = '1'
+                                this.showDialogNewPerson = true
+                                break;
+
+                            case 11:
+                                this.input_person.identity_document_type_id = '6'
+                                this.showDialogNewPerson = true
+                                break;
+                            default:
+                                this.input_person.identity_document_type_id = '6'
+                                this.showDialogNewPerson = true
+                                break;
+                        }
+                    }
+                }
+            },
+            initInputPerson() {
+                this.input_person = {
+                    number: null,
+                    identity_document_type_id: null
+                }
+            },
+        }
+    }
+</script>

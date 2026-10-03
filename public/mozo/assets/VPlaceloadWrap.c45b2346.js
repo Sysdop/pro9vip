@@ -1,0 +1,1 @@
+import{_ as o}from"./plugin-vue_export-helper.5a098b48.js";import{f as r,g as s,y as n}from"./vendor.27ef54d8.js";const t={},_={class:"placeload-wrap is-flex"};function a(e,c){return r(),s("div",_,[n(e.$slots,"default")])}var f=o(t,[["render",a]]);export{f as _};

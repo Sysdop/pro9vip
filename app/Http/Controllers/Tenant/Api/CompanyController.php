@@ -1,0 +1,135 @@
+<?php
+namespace App\Http\Controllers\Tenant\Api;
+
+use App\CoreFacturalo\Facturalo;
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use App\Models\Tenant\User;
+use App\Models\Tenant\Establishment;
+use App\Models\Tenant\Company;
+use App\Models\Tenant\Person;
+use App\Models\Tenant\PaymentMethodType;
+use Modules\Finance\Traits\FinanceTrait;
+
+class CompanyController extends Controller
+{
+   
+    use FinanceTrait;
+
+    public function record(Request $request) {
+
+        $user = new User();
+        if(\Auth::user()){
+            $user = \Auth::user();
+        }
+
+        $establishment_id =  $user->establishment_id;
+        $establishments = Establishment::without(['country', 'department', 'province', 'district'])
+            ->when($establishment_id, fn($q) => $q->where('id', $establishment_id))
+            ->get();
+
+        // Red de seguridad: si el usuario no tiene establishment_id o apunta a uno inexistente.
+        if ($establishments->isEmpty()) {
+            $establishments = Establishment::without(['country', 'department', 'province', 'district'])
+                ->take(1)->get();
+        }
+        $series = collect($user->getSeries())->values()->all();
+        /*$customers = Person::without(['country', 'department', 'province', 'district'])
+                               ->whereType('customers')
+                               ->whereIsEnabled()
+                               ->orderBy('name')
+                               ->take(2000)
+                               ->get()->transform(function ($row) {
+                                    return [
+                                        'id'                                     => $row->id,
+                                        'codigo_tipo_documento_identidad'        => $row->identity_document_type_id,
+                                        'numero_documento'                       => $row->number,
+                                        'apellidos_y_nombres_o_razon_social'     => $row->name,
+                                        'codigo_pais'                            => $row->country_id,
+                                        'direccion'                              => $row->address,
+                                        'correo_electronico'                     => $row->email,
+                                        'telefono'                               => $row->telephone,
+                                    ];
+
+                                });*/
+        // Lista inicial para el login de Vendeya (compatibilidad). La búsqueda
+        // completa usa GET /api/company/customers?input=
+        $customers = $this->customersQuery()
+            ->orderBy('name')
+            ->take(2000)
+            ->get()
+            ->map(fn ($row) => $this->transformCustomer($row))
+            ->values();
+        $payment_method_types = PaymentMethodType::NotCredit()->
+        where('id', '!=', '07')->get();
+
+        $payment_destinations = $this->getPaymentDestinations();
+        return [
+            'series' => $series,
+            'establishments' => $establishments,
+            'company' =>  Company::active(),
+            'customers' => $customers,
+            'payment_method_types' => $payment_method_types,
+            'payment_destinations' => $payment_destinations
+        ];
+
+    }
+
+    /**
+     * Búsqueda de clientes para Vendeya / Mozo.
+     * GET /api/company/customers?input=...&identity_document_type_id=6&limit=30
+     */
+    public function searchCustomers(Request $request)
+    {
+        $input = trim((string) $request->input('input', ''));
+        $identityDocumentTypeId = $request->input('identity_document_type_id');
+        $limit = (int) $request->input('limit', 30);
+        $limit = $limit > 0 ? min($limit, 50) : 30;
+
+        $query = $this->customersQuery();
+
+        if ($input !== '') {
+            $query->where(function ($q) use ($input) {
+                $q->where('number', 'like', "%{$input}%")
+                    ->orWhere('name', 'like', "%{$input}%");
+            });
+        }
+
+        if ($identityDocumentTypeId !== null && $identityDocumentTypeId !== '') {
+            $query->where('identity_document_type_id', (string) $identityDocumentTypeId);
+        }
+
+        $customers = $query->orderBy('name')
+            ->take($limit)
+            ->get()
+            ->map(fn ($row) => $this->transformCustomer($row))
+            ->values();
+
+        return [
+            'success' => true,
+            'customers' => $customers,
+        ];
+    }
+
+    private function customersQuery()
+    {
+        return Person::without(['country', 'department', 'province', 'district'])
+            ->whereType('customers')
+            ->whereIsEnabled();
+    }
+
+    private function transformCustomer(Person $row): array
+    {
+        return [
+            'id'                                 => $row->id,
+            'codigo_tipo_documento_identidad'    => $row->identity_document_type_id,
+            'numero_documento'                   => $row->number,
+            'apellidos_y_nombres_o_razon_social' => $row->name,
+            'codigo_pais'                        => $row->country_id,
+            'direccion'                          => $row->address,
+            'correo_electronico'                 => $row->email,
+            'telefono'                           => $row->telephone,
+        ];
+    }
+}

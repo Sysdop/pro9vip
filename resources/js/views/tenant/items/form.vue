@@ -1,0 +1,3477 @@
+<template>
+    <el-dialog :close-on-click-modal="false"
+               :visible="showDialog"
+               append-to-body
+               class="pt-0"
+               top="7vh"
+               width="65%"
+               @close="close"
+               @open="create">
+        <span slot="title" class="ifb-dialog-title">
+            <span class="el-dialog__title">{{ titleDialog }}</span>
+            <span class="ifb-dialog-title-actions">
+                <template v-if="editingLayout">
+                    <button type="button" class="btn btn-sm second-buton mt-1" @click="cancelLayoutEditFromHeader">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-x" style="margin-top: -2px;"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M18 6l-12 12" /><path d="M6 6l12 12" /></svg>
+                        Cancelar
+                    </button>
+                    <button @click="resetLayoutFromHeader" class="btn btn-sm second-buton">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-refresh" style="margin-top: -2px;"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4" /><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4" /></svg>
+                        Restablecer
+                    </button>
+                    <button :loading="layout_saving" @click="confirmLayoutFromHeader" class="btn btn-sm btn-primary">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-device-floppy" style="margin-top: -2px;"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M6 4h10l4 4v10a2 2 0 0 1 -2 2h-12a2 2 0 0 1 -2 -2v-12a2 2 0 0 1 2 -2" /><path d="M10 14a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M14 4l0 4l-6 0l0 -4" /></svg>
+                        Guardar
+                    </button>
+                </template>
+                <template v-else>
+                    <button class="btn btn-sm second-buton edit-layout-btn" @click="enterLayoutEditFromHeader">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-adjustments-horizontal" style="margin-top: -2px;"><path stroke="none" d="M0 0h24v24H0z" fill="none" /><path d="M12 6a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M4 6l8 0" /><path d="M16 6l4 0" /><path d="M6 12a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M4 12l2 0" /><path d="M10 12l10 0" /><path d="M15 18a2 2 0 1 0 4 0a2 2 0 1 0 -4 0" /><path d="M4 18l11 0" /><path d="M19 18l1 0" /></svg>
+                        Personalizar barra
+                    </button>
+                </template>
+            </span>
+        </span>
+        <form autocomplete="off"
+              :class="{ 'layout-editing-active': editingLayout }"
+              @focusin.capture="selectInputOnFocus"
+              @submit.prevent="submit">
+
+            <item-form-pinned-bar ref="pinnedBar"
+                                  :variant="resolvedVariant"
+                                  :pinned-fields="pinned_fields"
+                                  :saving="layout_saving"
+                                  :global-igv-handling="globalIgvHandling"
+                                  @editing-changed="editingLayout = $event"
+                                  @save="onSaveLayout">
+                <template #internal_id>
+                    <div :class="{'has-danger': errors.internal_id}" class="form-group">
+                        <template v-if="inventory_configuration && inventory_configuration.generate_internal_id">
+                            <label class="control-label">Código Interno
+                                <el-tooltip class="item"
+                                            content="Código interno de la empresa para el control de sus productos | Autogenerado por el sistema"
+                                            effect="dark"
+                                            placement="top-start">
+                                    <i class="fa fa-info-circle"></i>
+                                </el-tooltip>
+                            </label>
+                            <el-input v-model="form.internal_id" dusk="internal_id"></el-input>
+                            <small v-if="errors.internal_id"
+                                   class="form-control-feedback"
+                                   v-text="errors.internal_id[0]"></small>
+                        </template>
+                        <template v-else>
+                            <label class="control-label">Código Interno
+                                <el-tooltip class="item"
+                                            content="Código interno de la empresa para el control de sus productos"
+                                            effect="dark"
+                                            placement="top-start">
+                                    <i class="fa fa-info-circle"></i>
+                                </el-tooltip>
+                            </label>
+                            <el-input v-model="form.internal_id" dusk="internal_id"></el-input>
+                            <small v-if="errors.internal_id"
+                                   class="form-control-feedback"
+                                   v-text="errors.internal_id[0]"></small>
+                        </template>
+                    </div>
+                </template>
+                <template #description>
+                    <div :class="{'has-danger': errors.description}" class="form-group">
+                        <label class="control-label">Nombre<span class="text-danger">*</span></label>
+                        <el-input v-model="form.description" dusk="description"></el-input>
+                        <small v-if="errors.description"
+                               class="form-control-feedback"
+                               v-text="errors.description[0]"></small>
+                    </div>
+                </template>
+                <template #sale_unit_price>
+                    <div :class="{'has-danger': errors.sale_unit_price}" class="form-group">
+                        <label class="control-label">Precio Unitario <template v-if="!isNrus"><small v-if="form.has_igv">(con IGV)</small> <small v-else>(sin IGV)</small></template><span class="text-danger">*</span></label>
+                        <el-input v-model="form.sale_unit_price"
+                                  class="input-select-all"
+                                  dusk="sale_unit_price"
+                                  @input="calculatePercentageOfProfitBySale"></el-input>
+                        <small v-if="!isNrus" :style="saleUnitPriceBreakdown ? 'opacity: 1' : 'opacity: 0'" class="text-muted">
+                            <template v-if="saleUnitPriceBreakdown">
+                                {{ saleUnitPriceBreakdown }}
+                            </template>
+                            <template v-else>
+                                &nbsp;
+                            </template>
+                        </small>
+                        <small v-if="errors.sale_unit_price"
+                               class="form-control-feedback"
+                               v-text="errors.sale_unit_price[0]"></small>
+                    </div>
+                </template>
+                <template #second_name>
+                    <div :class="{'has-danger': errors.second_name}" class="form-group">
+                        <label class="control-label">Nombre secundario</label>
+                        <el-input v-model="form.second_name" dusk="second_name"></el-input>
+                        <small v-if="errors.second_name"
+                               class="form-control-feedback"
+                               v-text="errors.second_name[0]"></small>
+                    </div>
+                </template>
+                <template #name>
+                    <div :class="{'has-danger': errors.name}" class="form-group">
+                        <label class="control-label">Descripción</label>
+                        <el-input v-model="form.name" dusk="name"></el-input>
+                        <small v-if="errors.name"
+                               class="form-control-feedback"
+                               v-text="errors.name[0]"></small>
+                    </div>
+                </template>
+                <template #model>
+                    <div :class="{'has-danger': errors.model}" class="form-group">
+                        <label class="control-label">Modelo</label>
+                        <el-input v-model="form.model" dusk="model"></el-input>
+                        <small v-if="errors.model"
+                               class="form-control-feedback"
+                               v-text="errors.model[0]"></small>
+                    </div>
+                </template>
+                <template #unit_type_id>
+                    <div :class="{'has-danger': errors.unit_type_id}" class="form-group">
+                        <label class="control-label">Unidad</label>
+                        <el-select v-model="form.unit_type_id" dusk="unit_type_id">
+                            <el-option v-for="option in unit_types"
+                                       :key="option.id"
+                                       :label="option.description"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.unit_type_id"
+                               class="form-control-feedback"
+                               v-text="errors.unit_type_id[0]"></small>
+                    </div>
+                </template>
+                <template #currency_type_id>
+                    <div :class="{'has-danger': errors.currency_type_id}" class="form-group">
+                        <label class="control-label">Moneda</label>
+                        <el-select v-model="form.currency_type_id" dusk="currency_type_id">
+                            <el-option v-for="option in currency_types"
+                                       :key="option.id"
+                                       :label="option.description"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.currency_type_id"
+                               class="form-control-feedback"
+                               v-text="errors.currency_type_id[0]"></small>
+                    </div>
+                </template>
+                <template #sale_affectation_igv_type_id>
+                    <div v-if="showAffectationIgvType" :class="{'has-danger': errors.sale_affectation_igv_type_id}" class="form-group">
+                        <label class="control-label">Tipo de afectación</label>
+                        <el-select v-model="form.sale_affectation_igv_type_id"
+                                   filterable
+                                   @change="changeAffectationIgvType">
+                            <el-option v-for="option in affectation_igv_types"
+                                       :key="option.id"
+                                       :label="option.description"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.sale_affectation_igv_type_id"
+                               class="form-control-feedback"
+                               v-text="errors.sale_affectation_igv_type_id[0]"></small>
+                    </div>
+                </template>
+                <template #barcode>
+                    <div :class="{'has-danger': errors.barcode}" class="form-group">
+                        <label class="control-label">Código de barra</label>
+                        <el-input v-model="form.barcode"></el-input>
+                        <small v-if="errors.barcode"
+                               class="form-control-feedback"
+                               v-text="errors.barcode[0]"></small>
+                    </div>
+                </template>
+                <template #has_igv>
+                    <div :class="{'has-danger': errors.has_igv}" class="form-group">
+                        <label class="control-label">Incluye IGV</label>
+                        <el-checkbox v-model="form.has_igv">Sí</el-checkbox>
+                    </div>
+                </template>
+                <template #has_plastic_bag_taxes>
+                    <div :class="{'has-danger': errors.has_plastic_bag_taxes}" class="form-group">
+                        <label class="control-label">Impuesto a la Bolsa Plástica</label>
+                        <el-checkbox v-model="form.has_plastic_bag_taxes">Sí</el-checkbox>
+                    </div>
+                </template>
+                <template #calculate_quantity>
+                    <div :class="{'has-danger': errors.calculate_quantity}" class="form-group">
+                        <label class="control-label">Calcular cantidad por precio</label>
+                        <el-checkbox v-model="form.calculate_quantity">Sí</el-checkbox>
+                    </div>
+                </template>
+                <template #stock>
+                    <div :class="{'has-danger': errors.stock}" class="form-group">
+                        <label class="control-label">Stock Inicial</label>
+                        <el-input v-model="form.stock" class="input-select-all"></el-input>
+                        <small v-if="errors.stock"
+                               class="form-control-feedback"
+                               v-text="errors.stock[0]"></small>
+                    </div>
+                </template>
+                <template #stock_min>
+                    <div :class="{'has-danger': errors.stock_min}" class="form-group">
+                        <label class="control-label">Stock Mínimo</label>
+                        <el-input v-model="form.stock_min" class="input-select-all"></el-input>
+                        <small v-if="errors.stock_min"
+                               class="form-control-feedback"
+                               v-text="errors.stock_min[0]"></small>
+                    </div>
+                </template>
+                <template #warehouse_id>
+                    <div :class="{'has-danger': errors.warehouse_id}" class="form-group">
+                        <label class="control-label">Almacén</label>
+                        <el-select v-model="form.warehouse_id" filterable>
+                            <el-option v-for="option in warehouses"
+                                       :key="option.id"
+                                       :label="option.description"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.warehouse_id"
+                               class="form-control-feedback"
+                               v-text="errors.warehouse_id[0]"></small>
+                    </div>
+                </template>
+                <template #category_id>
+                    <div :class="{'has-danger': errors.category_id}" class="form-group">
+                        <label class="control-label">Categoría</label>
+                        <el-select v-model="form.category_id" clearable filterable>
+                            <el-option v-for="option in categories"
+                                       :key="option.id"
+                                       :label="option.name"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.category_id"
+                               class="form-control-feedback"
+                               v-text="errors.category_id[0]"></small>
+                    </div>
+                </template>
+                <template #brand_id>
+                    <div :class="{'has-danger': errors.brand_id}" class="form-group">
+                        <label class="control-label">
+                            Marca
+                            <a v-if="form_brand.add == false"
+                               class="control-label font-weight-bold text-info"
+                               href="#"
+                               @click.prevent="form_brand.add = true">[ + Nuevo]</a>
+                            <a v-if="form_brand.add == true"
+                               class="control-label font-weight-bold text-info"
+                               href="#"
+                               @click.prevent="saveBrand">[ Guardar]</a>
+                            <a v-if="form_brand.add == true"
+                               class="control-label font-weight-bold text-danger"
+                               href="#"
+                               @click.prevent="cancelBrand">[ Cancelar]</a>
+                        </label>
+                        <el-input v-if="form_brand.add == true"
+                                  v-model="form_brand.name"
+                                  placeholder="Nombre de la marca"
+                                  @keyup.enter.native="saveBrand"></el-input>
+                        <el-select v-else v-model="form.brand_id" clearable filterable>
+                            <el-option v-for="option in brands"
+                                       :key="option.id"
+                                       :label="option.name"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.brand_id"
+                               class="form-control-feedback"
+                               v-text="errors.brand_id[0]"></small>
+                    </div>
+                </template>
+                <template #image>
+                    <item-images-manager :key="`images-${gallery_key}`"
+                                         :images="gallery"
+                                         :max="max_images"
+                                         :action="`/${resource}/upload`"
+                                         :headers="headers"
+                                         :allowed-types="allowed_image_types"
+                                         :max-size-kb="max_image_size_kb"
+                                         :hint="imageUploadHint"
+                                         @add="addGalleryImage"
+                                         @remove="removeGalleryImage"
+                                         @reorder="reorderGallery"
+                                         @make-main="makeMainGalleryImage"></item-images-manager>
+                </template>
+                <template #purchase_unit_price>
+                    <div :class="{'has-danger': errors.purchase_unit_price}" class="form-group">
+                        <label class="control-label">Precio Unitario (Compra) <template v-if="!isNrus"><small v-if="form.purchase_has_igv">(con IGV)</small> <small v-else>(sin IGV)</small></template></label>
+                        <el-input v-model="form.purchase_unit_price"
+                                  class="input-select-all"
+                                  @input="calculatePercentageOfProfitByPurchase"></el-input>
+                        <small v-if="errors.purchase_unit_price"
+                               class="form-control-feedback"
+                               v-text="errors.purchase_unit_price[0]"></small>
+                    </div>
+                </template>
+                <template #purchase_affectation_igv_type_id>
+                    <div v-if="showAffectationIgvType" :class="{'has-danger': errors.purchase_affectation_igv_type_id}" class="form-group">
+                        <label class="control-label">Tipo de afectación (Compra)</label>
+                        <el-select v-model="form.purchase_affectation_igv_type_id"
+                                   @change="changePurchaseAffectationIgvType">
+                            <el-option v-for="option in affectation_igv_types"
+                                       :key="option.id"
+                                       :label="option.description"
+                                       :value="option.id"></el-option>
+                        </el-select>
+                        <small v-if="errors.purchase_affectation_igv_type_id"
+                               class="form-control-feedback"
+                               v-text="errors.purchase_affectation_igv_type_id[0]"></small>
+                    </div>
+                </template>
+            </item-form-pinned-bar>
+
+            <!-- lazy: al abrir ninguna pestaña está activa; montar las 10 de golpe
+                 hacía que la animación del diálogo recalculara estilos de todo
+                 su contenido oculto. Cada pestaña se monta al abrirla por
+                 primera vez y queda montada. -->
+            <el-tabs v-model="activeName" @tab-click="handleTabClick">
+                <el-tab-pane lazy v-if="showTab('general')"
+                             class
+                             name="first">
+                    <span slot="label">General</span>
+                    <div class="row">
+                        <div v-show="!globalIgvHandling && !isPinned('has_igv')" class="col-md-3 field-pinnable">
+                            <div v-show="show_has_igv"
+                                 class="">
+                                <div :class="{'has-danger': errors.has_igv}"
+                                     class="form-group">
+                                    <el-checkbox v-model="form.has_igv">Incluye Igv
+                                    </el-checkbox>
+                                    <br>
+                                    <small v-if="errors.has_igv"
+                                           class="form-control-feedback"
+                                           v-text="errors.has_igv[0]"></small>
+                                </div>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('has_igv')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('has_plastic_bag_taxes')" class="col-md-4 field-pinnable">
+                            <div class="">
+                                <div :class="{'has-danger': errors.has_plastic_bag_taxes}"
+                                     class="form-group">
+                                    <el-checkbox v-model="form.has_plastic_bag_taxes">Impuesto a la Bolsa Plástica
+                                    </el-checkbox>
+                                    <br>
+                                    <small v-if="errors.has_plastic_bag_taxes"
+                                           class="form-control-feedback"
+                                           v-text="errors.has_plastic_bag_taxes[0]"></small>
+                                </div>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('has_plastic_bag_taxes')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('calculate_quantity')" class="col-md-5 field-pinnable">
+                            <div v-show="['KGM', 'LTR', 'MTR', 'GLL'].includes(form.unit_type_id)"
+                                 class="">
+                                <div :class="{'has-danger': errors.calculate_quantity}"
+                                     class="form-group">
+                                    <el-checkbox v-model="form.calculate_quantity">Calcular cantidad por precio
+                                    </el-checkbox>
+                                    <br>
+                                    <small v-if="errors.calculate_quantity"
+                                           class="form-control-feedback"
+                                           v-text="errors.calculate_quantity[0]"></small>
+                                </div>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('calculate_quantity')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('second_name')" class="col-md-6 field-pinnable">
+                            <div :class="{'has-danger': errors.second_name}"
+                                 class="form-group">
+                                <label class="control-label">Nombre secundario </label>
+                                <el-input v-model="form.second_name"
+                                          dusk="second_name"></el-input>
+                                <small v-if="errors.second_name"
+                                       class="form-control-feedback"
+                                       v-text="errors.second_name[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('second_name')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('name')" class="col-md-6 field-pinnable">
+                            <div :class="{'has-danger': errors.name}"
+                                 class="form-group">
+                                <label class="control-label">Descripción</label>
+                                <el-input v-model="form.name"
+                                          dusk="name"></el-input>
+                                <small v-if="errors.name"
+                                       class="form-control-feedback"
+                                       v-text="errors.name[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('name')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('model')" class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.model}"
+                                 class="form-group">
+                                <label class="control-label">Modelo</label>
+                                <el-input v-model="form.model"
+                                          dusk="model"></el-input>
+                                <small v-if="errors.model"
+                                       class="form-control-feedback"
+                                       v-text="errors.model[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('model')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('unit_type_id')" class="field-pinnable" :class="!showAffectationIgvType || currency_types.length <= 1 ? 'col-md-3' : 'col-md-2'">
+                            <div :class="{'has-danger': errors.unit_type_id}"
+                                 class="form-group">
+                                <label class="control-label">Unidad</label>
+                                <el-select v-model="form.unit_type_id"
+                                           dusk="unit_type_id">
+                                    <el-option v-for="option in unit_types"
+                                               :key="option.id"
+                                               :label="option.description"
+                                               :value="option.id"></el-option>
+                                </el-select>
+                                <small v-if="errors.unit_type_id"
+                                       class="form-control-feedback"
+                                       v-text="errors.unit_type_id[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('unit_type_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-if="currency_types.length > 1"
+                             v-show="!isPinned('currency_type_id')"
+                             class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.currency_type_id}"
+                                 class="form-group">
+                                <label class="control-label">Moneda</label>
+                                <el-select v-model="form.currency_type_id"
+                                           dusk="currency_type_id">
+                                    <el-option v-for="option in currency_types"
+                                               :key="option.id"
+                                               :label="option.description"
+                                               :value="option.id"></el-option>
+                                </el-select>
+                                <small v-if="errors.currency_type_id"
+                                       class="form-control-feedback"
+                                       v-text="errors.currency_type_id[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('currency_type_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('sale_affectation_igv_type_id') && showAffectationIgvType" class="col-md-4 field-pinnable">
+                            <div :class="{'has-danger': errors.sale_affectation_igv_type_id}"
+                                 class="form-group">
+                                <label class="control-label">Tipo de afectación</label>
+                                <el-select
+                                    v-model="form.sale_affectation_igv_type_id"
+                                    filterable
+                                    @change="changeAffectationIgvType">
+                                    <el-option
+                                        v-for="option in affectation_igv_types"
+                                        :key="option.id"
+                                        :label="option.description"
+                                        :value="option.id"
+                                    ></el-option>
+                                </el-select>
+                                <small
+                                    v-if="errors.sale_affectation_igv_type_id"
+                                    class="form-control-feedback"
+                                    v-text="errors.sale_affectation_igv_type_id[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('sale_affectation_igv_type_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-if="form.unit_type_id !='ZZ'"
+                             v-show="recordId==null && !isPinned('warehouse_id')"
+                             class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.warehouse_id}"
+                                 class="form-group">
+                                <label class="control-label">
+                                    Almacén
+                                    <el-tooltip class="item"
+                                                content="Si no selecciona almacén, se asignará por defecto el relacionado al sucursal"
+                                                effect="dark"
+                                                placement="top">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <el-select v-model="form.warehouse_id"
+                                           filterable>
+                                    <el-option v-for="option in warehouses"
+                                               :key="option.id"
+                                               :label="option.description"
+                                               :value="option.id"></el-option>
+                                </el-select>
+                                <small v-if="errors.warehouse_id"
+                                       class="form-control-feedback"
+                                       v-text="errors.warehouse_id[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('warehouse_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="variation_rows.length === 0 && (recordId==null && form.unit_type_id !='ZZ' && !isPinned('stock'))  "
+                             class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.stock}"
+                                 class="form-group">
+                                <label class="control-label">Stock Inicial</label>
+                                <el-input v-model="form.stock" class="input-select-all"></el-input>
+                                <small v-if="errors.stock"
+                                       class="form-control-feedback"
+                                       v-text="errors.stock[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('stock')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="form.unit_type_id !='ZZ' && !isPinned('stock_min')"
+                             class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.stock_min}"
+                                 class="form-group">
+                                <label class="control-label">Stock Mínimo</label>
+                                <el-input v-model="form.stock_min" class="input-select-all"></el-input>
+                                <small v-if="errors.stock_min"
+                                       class="form-control-feedback"
+                                       v-text="errors.stock_min[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('stock_min')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('barcode')" class="col-md-3 field-pinnable">
+                            <div :class="{'has-danger': errors.barcode}"
+                                 class="form-group">
+                                <label class="control-label">Código de barra</label>
+                                <el-input v-model="form.barcode"></el-input>
+                                <small v-if="errors.barcode"
+                                       class="form-control-feedback"
+                                       v-text="errors.barcode[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('barcode')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="showPharmaElement"
+                             class="col-md-3">
+                            <div :class="{'has-danger': errors.line}"
+                                 class="form-group">
+                                <label class="control-label">
+                                    Línea de producto
+                                    <el-tooltip class="item"
+                                                content="Grupo de productos que tienen una relación directa entre sí"
+                                                effect="dark"
+                                                placement="top">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <el-input v-model="form.line">
+                                </el-input>
+                                <small v-if="errors.line"
+                                       class="form-control-feedback"
+                                       v-text="errors.line[0]"></small>
+                            </div>
+                        </div>
+                        <!-- sanitary -->
+                        <div v-show="showPharmaElement"
+                             class="col-md-3">
+                            <div :class="{'has-danger': errors.sanitary}"
+                                 class="form-group">
+                                <label class="control-label">
+                                    Registro Sanitario
+                                    <el-tooltip
+                                        class="item"
+                                        content="Número de registro sanitario"
+                                        effect="dark"
+                                        placement="top">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <el-input v-model="form.sanitary">
+                                </el-input>
+                                <small v-if="errors.sanitary"
+                                       class="form-control-feedback"
+                                       v-text="errors.sanitary[0]"></small>
+                            </div>
+                        </div>
+                        <!-- cod_digemid -->
+                        <div v-show="showPharmaElement"
+                             class="col-md-3">
+                            <div :class="{'has-danger': errors.cod_digemid}"
+                                 class="form-group">
+                                <label class="control-label">
+                                    Código DIGEMID
+                                    <el-tooltip
+                                        class="item"
+                                        content="Código de observación DIGEMID"
+                                        effect="dark"
+                                        placement="top">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <el-input v-model="form.cod_digemid">
+                                </el-input>
+                                <small v-if="errors.cod_digemid"
+                                       class="form-control-feedback"
+                                       v-text="errors.cod_digemid[0]"></small>
+                            </div>
+                        </div>
+
+                        <div class="col-md-3" v-if="resolvedVariant === 'restaurant'">
+                            <div :class="{'has-danger': errors.preparation_area_id}" class="form-group">
+                                <label class="control-label">Areas de preparación</label>
+                                <el-select v-model="form.preparation_area_id" dusk="preparation_area_id" onchange="changePreparationArea">
+                                    <el-option v-for="option in preparation_areas"
+                                               :key="option.id"
+                                               :label="option.name"
+                                               :value="option.id"></el-option>
+                                </el-select>
+                                <small v-if="errors.preparation_area_id"
+                                    class="form-control-feedback"
+                                    v-text="errors.preparation_area_id[0]"></small>
+                            </div>
+                        </div>
+
+                        <template v-if="!isNrus">
+                        <div class="col-md-3" v-if="showRestrictSaleItemsCpe">
+                            <div :class="{'has-danger': errors.restrict_sale_cpe}"
+                                 class="form-group">
+                                <el-checkbox v-model="form.restrict_sale_cpe">Restringir venta en CPE</el-checkbox>
+                                <br>
+                                <small v-if="errors.restrict_sale_cpe"
+                                       class="form-control-feedback"
+                                       v-text="errors.restrict_sale_cpe[0]"></small>
+                            </div>
+                        </div>
+
+                        <template v-if="showPointSystem">
+                            <div class="col-md-3">
+                                <div :class="{'has-danger': errors.exchange_points}"
+                                    class="form-group">
+                                    <el-checkbox v-model="form.exchange_points">¿Se puede canjear por puntos?</el-checkbox>
+                                    <br>
+                                    <small v-if="errors.exchange_points"
+                                        class="form-control-feedback"
+                                        v-text="errors.exchange_points[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-3 mb-2" v-if="form.exchange_points">
+                                <label class="control-label">
+                                    N° de puntos
+                                    <el-tooltip
+                                        class="item"
+                                        content="Total de puntos que necesitará el cliente para canjear el producto."
+                                        effect="dark"
+                                        placement="top-start">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </label>
+                                <div :class="{'has-danger': errors.quantity_of_points}" class="form-group">
+                                    <el-input-number v-model="form.quantity_of_points" :min="0.01" :precision="2" :step="1" controls-position="right"></el-input-number>
+                                    <small v-if="errors.quantity_of_points" class="form-control-feedback" v-text="errors.quantity_of_points[0]"></small>
+                                </div>
+                            </div>
+                        </template>
+                        </template>
+                        <div class="col-12 mt-3">
+                            <div class="row">
+                                <div v-show="!isPinned('image')" class="col-md-3 field-pinnable" data-field-key="image">
+                                    <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('image')"><i class="el-icon-top"></i> Fijar arriba</button>
+                                    <item-images-manager :key="`images-${gallery_key}`"
+                                                         :images="gallery"
+                                                         :max="max_images"
+                                                         :action="`/${resource}/upload`"
+                                                         :headers="headers"
+                                                         :allowed-types="allowed_image_types"
+                                                         :max-size-kb="max_image_size_kb"
+                                                         :hint="imageUploadHint"
+                                                         @add="addGalleryImage"
+                                                         @remove="removeGalleryImage"
+                                                         @reorder="reorderGallery"
+                                                         @make-main="makeMainGalleryImage"></item-images-manager>
+                                </div>
+                                <div class="col-md-9 px-0">
+                                    <div class="row">
+                                        <div v-show="!isPinned('category_id')" class="col-md-6 field-pinnable">
+                                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('category_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                                            <div :class="{'has-danger': errors.category_id}"
+                                                 class="form-group">
+                                                <label class="control-label">Categoría</label>
+                                                <el-input v-if="form_category.add == true"
+                                                          v-model="form_category.name"
+                                                          dusk="item_code"
+                                                          style="margin-bottom:1.5%;"></el-input>
+
+                                                <el-select v-if="form_category.add == false"
+                                                           v-model="form.category_id"
+                                                           clearable
+                                                           filterable
+                                                           :filter-method="filterCategories"
+                                                           @visible-change="onCategoryDropdownChange"
+                                                           @keydown.enter.native.prevent="createCategoryFromSearch">
+                                                    <el-option v-for="option in filteredCategories"
+                                                               :key="option.id"
+                                                               :label="option.name"
+                                                               :value="option.id"></el-option>
+                                                    <template slot="empty">
+                                                        <p v-if="loading_search" class="el-select-dropdown__empty">
+                                                            Cargando...
+                                                        </p>
+                                                        <p v-else-if="categorySearchQuery" class="el-select-dropdown__empty">
+                                                            No se encontraron resultados
+                                                        </p>
+
+                                                        <p v-else class="el-select-dropdown__empty">
+                                                            No hay categorías. <br> Escriba el nombre y presione Enter para crear
+                                                        </p>
+
+                                                        <div
+                                                            v-if="!loading_search && categorySearchQuery"
+                                                            class="el-select-dropdown__item new-option"
+                                                            @click.stop="createCategoryFromSearch"
+                                                        >
+                                                            <span>Crear categoría "{{ categorySearchQuery }}"</span>
+                                                        </div>
+                                                    </template>
+                                                </el-select>
+                                                <small v-if="errors.category_id"
+                                                       class="form-control-feedback"
+                                                       v-text="errors.category_id[0]"></small>
+                                            </div>
+                                        </div>
+                                        <div v-show="!isPinned('brand_id')" class="col-md-6 field-pinnable">
+                                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('brand_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                                            <div :class="{'has-danger': errors.brand_id}"
+                                                 class="form-group">
+                                                <label class="control-label">
+                                                    Marca
+                                                    <a v-if="form_brand.add == false"
+                                                        class="control-label font-weight-bold text-info"
+                                                        href="#"
+                                                        @click.prevent="form_brand.add = true"> [ + Nuevo]</a>
+                                                    <a v-if="form_brand.add == true"
+                                                        class="control-label font-weight-bold text-info"
+                                                        href="#"
+                                                        @click.prevent="saveBrand"> [ Guardar]</a>
+                                                    <a v-if="form_brand.add == true"
+                                                        class="control-label font-weight-bold text-danger"
+                                                        href="#"
+                                                        @click.prevent="cancelBrand"> [ Cancelar]</a>
+                                                </label>
+                                                <el-input v-if="form_brand.add == true"
+                                                          v-model="form_brand.name"
+                                                          placeholder="Nombre de la marca"
+                                                          @keyup.enter.native="saveBrand"
+                                                          dusk="item_code"
+                                                          style="margin-bottom:1.5%;"></el-input>
+
+                                                <el-select v-if="form_brand.add == false"
+                                                           v-model="form.brand_id"
+                                                           clearable
+                                                           filterable
+                                                           :filter-method="filterBrands"
+                                                           @visible-change="onBrandDropdownChange"
+                                                           @keydown.enter.native.prevent="createBrandFromSearch">
+                                                    <el-option v-for="option in filteredBrands"
+                                                               :key="option.id"
+                                                               :label="option.name"
+                                                               :value="option.id"></el-option>
+                                                    <template slot="empty">
+                                                        <p v-if="loading_search" class="el-select-dropdown__empty">
+                                                            Cargando...
+                                                        </p>
+
+                                                        <p v-else-if="brandSearchQuery" class="el-select-dropdown__empty">
+                                                            No se encontraron resultados
+                                                        </p>
+
+                                                        <p v-else class="el-select-dropdown__empty">
+                                                            No hay marcas. <br> Escriba el nombre y presione Enter para crear
+                                                        </p>
+
+                                                        <div
+                                                            v-if="!loading_search && brandSearchQuery"
+                                                            class="el-select-dropdown__item new-option"
+                                                            @click.stop="createBrandFromSearch"
+                                                        >
+                                                            <span>Crear marca "{{ brandSearchQuery }}"</span>
+                                                        </div>
+                                                    </template>
+                                                </el-select>
+                                                <small v-if="errors.brand_id"
+                                                       class="form-control-feedback"
+                                                       v-text="errors.brand_id[0]"></small>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div v-if="attribute_types.length > 0">
+                                <h5 class="separator-title mb-0">
+                                    Listado
+                                    <el-tooltip class="item"
+                                                content="Diferentes presentaciones para la venta del producto"
+                                                effect="dark"
+                                                placement="top">
+                                        <i class="fa fa-info-circle"></i>
+                                    </el-tooltip>
+                                </h5>
+                            </div>
+                            <div v-if="form.attributes.length > 0">
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0 table-borderless">
+                                        <thead>
+                                        <tr>
+                                            <th class="pb-0">Tipo</th>
+                                            <th class="pb-0">Descripción</th>
+                                            <th class="pb-0"></th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="(row, index) in form.attributes"
+                                            :key="index">
+                                            <td>
+                                                <el-select v-model="row.attribute_type_id"
+                                                           filterable
+                                                           @change="changeAttributeType(index)">
+                                                    <el-option v-for="option in attribute_types"
+                                                               :key="option.id"
+                                                               :label="option.description"
+                                                               :value="option.id"></el-option>
+                                                </el-select>
+                                            </td>
+                                            <td>
+                                                <el-input v-model="row.value"></el-input>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-xs btn-danger btn-shad"
+                                                        type="button"
+                                                        @click.prevent="clickRemoveAttribute(index)"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                                    <a class="control-label font-weight-bold text-info"
+                                       href="#"
+                                       @click.prevent="clickAddAttribute">[+ Agregar]</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </el-tab-pane>
+
+                <el-tab-pane lazy class
+                             v-if="!isService && showTab('warehouses') && !isNrus"
+                             name="second">
+                    <span slot="label">Almacenes</span>
+                    <div class="row">
+                        <div v-show="form.unit_type_id !='ZZ'"
+                             class="col-12">
+                            <h5 class="separator-title mt-0">Precios por almacén</h5>
+                            <div class="table-responsive">
+                                <table class="table table-bordered">
+                                    <tbody>
+                                    <tr v-for="item in form.item_warehouse_prices"
+                                        :key="item.id">
+                                        <td>{{ item.description }}</td>
+                                        <td width="150">
+                                            <el-input v-model="item.price"
+                                                      min="0"
+                                                      placeholder="Precio"
+                                                      step="0.01"
+                                                      type="number"></el-input>
+                                        </td>
+                                    </tr>
+                                    <!-- <tr v-for="w in warehouses" :key="w.id">
+                                        <td>{{ w.description }}</td>
+                                        <td width="150">
+                                            <el-input placeholder="Precio" v-model="w.price" type="number" min="0" step="0.01"></el-input>
+                                        </td>
+                                    </tr> -->
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </el-tab-pane>
+                <el-tab-pane lazy class v-if="!isService && showTab('presentations')" name="third">
+                    <span slot="label">Presentaciones</span>
+                    <div class="row">
+                        <div v-show="form.unit_type_id !='ZZ'"
+                             class="col-md-12">
+                            <h5 class="separator-title mt-0">
+                                Listado de precios
+                                <el-tooltip class="item"
+                                            content="Aplica para realizar compra/venta en presentacion de diferentes precios y/o cantidades"
+                                            effect="dark"
+                                            placement="top">
+                                    <i class="fa fa-info-circle"></i>
+                                </el-tooltip>
+                                <small v-if="form.item_unit_types.length > 1 && !config.enable_list_product" class="text-warning">Sólo se toma en cuenta el primer registro para mostrar en POS</small>
+                            </h5>
+                        </div>
+                        <div v-if="form.item_unit_types.length > 0"
+                             v-show="form.unit_type_id !='ZZ'"
+                             class="col-md-12">
+                            <div class="table-responsive table-list-prices">
+                                <table class="table table-sm mb-0">
+                                    <thead class="bg-light">
+                                    <tr>
+                                        <th style="width: 50px;"></th>
+                                        <th class="text-center">Unidad</th>
+                                        <th class="text-center">Descripción</th>
+                                        <th class="text-center">
+                                            Factor
+                                            <el-tooltip class="item"
+                                                        content="Cantidad de unidades"
+                                                        effect="dark"
+                                                        placement="top">
+                                                <i class="fa fa-info-circle"></i>
+                                            </el-tooltip>
+                                        </th>
+                                        <th v-if="config.enable_list_product"></th>
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                        <template v-for="(row, index) in form.item_unit_types">
+                                            <tr :key="'unit-' + index" class="border-0 border-bottom-prices-list">
+                                                <td class="text-center align-middle">
+                                                    <button
+                                                        type="button"
+                                                        class="btn p-0 btn-dropdown-toggle btn-chevron"
+                                                        :class="{'rotated': row.showPrices === true}"
+                                                        @click.prevent="togglePrices(index)"
+                                                    >
+                                                        <i
+                                                            class="fa fa-chevron-right"
+                                                        ></i>
+                                                    </button>
+                                                </td>
+                                                <td class="text-center align-middle">
+                                                    <template v-if="config.enable_list_product">
+                                                        <el-select v-model="row.unit_type_id">
+                                                            <el-option v-for="option in unit_types"
+                                                                :key="option.id"
+                                                                :label="option.description"
+                                                                :value="option.id"></el-option>
+                                                        </el-select>
+                                                    </template>
+                                                    <template v-else>
+                                                        {{ row.unit_type_id || row.description }}
+                                                    </template>
+                                                </td>
+                                                <td class="text-center align-middle">
+                                                    <template v-if="config.enable_list_product">
+                                                        <el-input v-model="row.description" type="text"></el-input>
+                                                    </template>
+                                                    <template v-else>
+                                                        {{ row.description }}
+                                                    </template>
+                                                </td>
+                                                <td class="text-center align-middle">
+                                                    <template v-if="config.enable_list_product">
+                                                        <el-input v-model="row.quantity_unit"
+                                                            :min="isDecimalUnit(row.unit_type_id) ? 0.0001 : 1"
+                                                            :step="isDecimalUnit(row.unit_type_id) ? 'any' : 1"
+                                                            type="number"></el-input>
+                                                    </template>
+                                                    <template v-else>
+                                                        {{ row.quantity_unit }}
+                                                    </template>
+                                                </td>
+                                                <td class="series-table-actions text-end" v-if="config.enable_list_product">
+                                                    <button v-if="row.id" class="btn btn-xs btn-danger btn-shad m-0"
+                                                            type="button"
+                                                            @click.prevent="clickDelete(row.id)">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                    </button>
+                                                    <button v-else class="btn btn-xs btn-danger btn-shad m-0"
+                                                            type="button"
+                                                            @click.prevent="clickCancel(index)">
+                                                        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                    </button>
+                                                </td>
+                                            </tr>
+                                            <tr
+                                                v-show="row.showPrices === true"
+                                                :key="'prices-' + index"
+                                                class="prices-row"
+                                            >
+                                                <td></td>
+                                                <td colspan="3" class="pt-0 pb-2 td-prices-list">
+                                                    <ItemPricesTable
+                                                        v-model="row.prices"
+                                                        :price-labels="{
+                                                            price1_label: config.price1_label,
+                                                            price2_label: config.price2_label,
+                                                            price3_label: config.price3_label
+                                                        }"
+                                                    />
+                                                </td>
+                                                <td v-if="config.enable_list_product"></td>
+                                            </tr>
+                                        </template>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                        <div class="col add-row-table" v-if="config.enable_list_product || !config.enable_list_product && form.item_unit_types.length < 1" @click="clickAddRow">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-circle-plus"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M3 12a9 9 0 1 0 18 0a9 9 0 0 0 -18 0" /><path d="M9 12h6" /><path d="M12 9v6" /></svg>
+                            Agregar lista de precios
+                        </div>
+                    </div>
+                </el-tab-pane>
+                <el-tab-pane lazy v-if="showTab('attributes')"
+                             class
+                             name="fourth">
+                    <span slot="label">Atributos</span>
+                    <div class="row">
+                        <template v-if="form.parent_item_id">
+                            <div class="col-12">
+                                <div class="alert alert-info mb-0">
+                                    <i class="fa fa-info-circle"></i>
+                                    Este producto es una variación. Sus atributos se gestionan desde el producto principal.
+                                </div>
+                            </div>
+                        </template>
+                        <template v-else>
+                            <div v-if="existing_variations.length > 0" class="col-12 mb-3">
+                                <label class="control-label">Variaciones registradas</label>
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr>
+                                            <th>Combinación</th>
+                                            <th style="width: 70px">
+                                                Imagen
+                                                <el-tooltip placement="top">
+                                                    <div slot="content">
+                                                        Imagen propia de cada variación.<br>
+                                                        Si no tiene una, se muestra la imagen del producto principal.
+                                                    </div>
+                                                    <i class="fa fa-info-circle"></i>
+                                                </el-tooltip>
+                                            </th>
+                                            <th>Código interno</th>
+                                            <th>Código de barras</th>
+                                            <th class="text-end">Precio</th>
+                                            <th class="text-end">Stock</th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="row in existing_variations" :key="'existing-variation-' + row.id">
+                                            <td>{{ row.variation_label }}</td>
+                                            <td>
+                                                <el-tooltip placement="top"
+                                                            :content="`${row.has_own_image ? 'Cambiar la imagen de esta variación' : 'Subir una imagen propia (ahora usa la del producto principal)'}. ${imageUploadHint}`">
+                                                    <el-upload :action="`/${resource}/upload`"
+                                                               :data="{'type': 'items'}"
+                                                               :headers="headers"
+                                                               :before-upload="beforeUploadImage"
+                                                               :on-success="(response) => onExistingVariationImageSuccess(response, row)"
+                                                               :show-file-list="false"
+                                                               class="avatar-uploader item-img"
+                                                               style="width: 48px !important; margin-top: 0 !important;">
+                                                        <img v-if="row.image_url"
+                                                             :src="row.image_url"
+                                                             class="avatar">
+                                                        <i v-else class="el-icon-plus avatar-uploader-icon"></i>
+                                                    </el-upload>
+                                                </el-tooltip>
+                                            </td>
+                                            <td>{{ row.internal_id }}</td>
+                                            <td>{{ row.barcode }}</td>
+                                            <td class="text-end">{{ row.sale_unit_price }}</td>
+                                            <td class="text-end">{{ row.stock }}</td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+
+                            <template v-if="product_variables.length === 0">
+                                <div class="col-12">
+                                    <p class="text-muted mb-0">
+                                        Aún no hay variables de atributos.
+                                        <a href="/configurations/product-variables" target="_blank">Créalas desde "Gestionar atributos"</a>
+                                        para generar variaciones.
+                                    </p>
+                                </div>
+                            </template>
+                            <template v-else>
+                                <div class="col-12 mb-2 d-flex align-items-center">
+                                    <el-button size="mini"
+                                               plain
+                                               icon="el-icon-plus"
+                                               @click.prevent="openVariationPicker">Seleccionar atributos</el-button>
+                                    <small class="text-muted ms-2">
+                                        Activa los valores de cada atributo para generar variaciones bajo este producto principal.
+                                    </small>
+                                </div>
+                                <div v-for="variable in selectedVariables"
+                                     :key="'variable-values-' + variable.id"
+                                     class="col-md-6">
+                                    <div class="pv-variable-card">
+                                        <label class="control-label font-weight-bold d-block mb-2">
+                                            {{ variable.name }}
+                                            <small class="text-muted fw-normal">
+                                                ({{ (selected_values[variable.id] || []).length }}/{{ variable.values.length }})
+                                            </small>
+                                        </label>
+                                        <el-select :value="selected_values[variable.id] || []"
+                                                   multiple
+                                                   filterable
+                                                   clearable
+                                                   class="w-100"
+                                                   :class="{'pv-color-select': variable.value_type === 'color'}"
+                                                   :style="selectedColorVars(variable)"
+                                                   placeholder="Selecciona uno o varios valores"
+                                                   @input="setVariableValues(variable.id, $event)">
+                                            <el-option v-for="value in variable.values"
+                                                       :key="'value-option-' + value.id"
+                                                       :label="value.value"
+                                                       :value="value.id">
+                                                <span v-if="variable.value_type === 'color'"
+                                                      class="pv-color-dot"
+                                                      :style="{background: value.color}"></span>{{ value.value }}
+                                            </el-option>
+                                        </el-select>
+                                    </div>
+                                </div>
+
+                                <div class="col-12 mt-2">
+                                    <div class="d-flex align-items-center justify-content-between attr-gen-bar">
+                                        <span>
+                                            Combinaciones a generar: <b>{{ combinationsCount }}</b>
+                                            <span v-if="combinationsDetail" class="text-muted">({{ combinationsDetail }})</span>
+                                        </span>
+                                        <el-button type="primary"
+                                                   size="mini"
+                                                   icon="el-icon-setting"
+                                                   :disabled="combinationsCount === 0"
+                                                   @click.prevent="generateCombinations">Generar combinaciones</el-button>
+                                    </div>
+                                </div>
+                            </template>
+
+                            <div v-if="variation_rows.length > 0" class="col-12">
+                                <div class="table-responsive">
+                                    <table class="table table-sm mb-0">
+                                        <thead>
+                                        <tr>
+                                            <th style="width: 18%">Combinación</th>
+                                            <th style="width: 70px">
+                                                Imagen
+                                                <el-tooltip placement="top">
+                                                    <div slot="content">
+                                                        Imagen propia de cada combinación.<br>
+                                                        Si no subes una, la variación usará la imagen del producto principal.
+                                                    </div>
+                                                    <i class="fa fa-info-circle"></i>
+                                                </el-tooltip>
+                                            </th>
+                                            <th style="width: 22%">Código interno</th>
+                                            <th style="width: 24%">Código de barras</th>
+                                            <th style="width: 16%">Precio</th>
+                                            <th style="width: 14%">Stock inicial</th>
+                                            <th></th>
+                                        </tr>
+                                        </thead>
+                                        <tbody>
+                                        <tr v-for="(row, index) in variation_rows" :key="'variation-row-' + index">
+                                            <td>
+                                                <span v-for="(color, colorIndex) in row.colors"
+                                                      :key="'variation-color-' + index + '-' + colorIndex"
+                                                      class="pv-color-dot"
+                                                      :style="{background: color}"></span>
+                                                {{ row.label }}
+                                                <small v-if="variationError(index, 'variable_value_ids')"
+                                                       class="form-control-feedback text-danger d-block"
+                                                       v-text="variationError(index, 'variable_value_ids')"></small>
+                                            </td>
+                                            <td>
+                                                <el-tooltip placement="top"
+                                                            :content="`${row.image_url ? 'Cambiar imagen' : 'Subir imagen para esta combinación'}. ${imageUploadHint}`">
+                                                    <el-upload :action="`/${resource}/upload`"
+                                                               :data="{'type': 'items'}"
+                                                               :headers="headers"
+                                                               :before-upload="beforeUploadImage"
+                                                               :on-success="(response) => onVariationImageSuccess(response, row)"
+                                                               :show-file-list="false"
+                                                               class="avatar-uploader item-img"
+                                                               style="width: 48px !important; margin-top: 0 !important;">
+                                                        <img v-if="row.image_url"
+                                                             :src="row.image_url"
+                                                             class="avatar">
+                                                        <i v-else class="el-icon-plus avatar-uploader-icon"></i>
+                                                    </el-upload>
+                                                </el-tooltip>
+                                            </td>
+                                            <td>
+                                                <el-input v-model="row.internal_id" size="small"></el-input>
+                                                <small v-if="variationError(index, 'internal_id')"
+                                                       class="form-control-feedback text-danger"
+                                                       v-text="variationError(index, 'internal_id')"></small>
+                                            </td>
+                                            <td>
+                                                <el-input v-model="row.barcode" size="small" placeholder="Automático"></el-input>
+                                                <small v-if="variationError(index, 'barcode')"
+                                                       class="form-control-feedback text-danger"
+                                                       v-text="variationError(index, 'barcode')"></small>
+                                            </td>
+                                            <td>
+                                                <el-input v-model="row.sale_unit_price" size="small" type="number" step="0.01" min="0"></el-input>
+                                                <small v-if="variationError(index, 'sale_unit_price')"
+                                                       class="form-control-feedback text-danger"
+                                                       v-text="variationError(index, 'sale_unit_price')"></small>
+                                            </td>
+                                            <td>
+                                                <el-input v-model="row.stock" size="small" type="number" min="0"></el-input>
+                                                <small v-if="variationError(index, 'stock')"
+                                                       class="form-control-feedback text-danger"
+                                                       v-text="variationError(index, 'stock')"></small>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-xs btn-danger btn-shad"
+                                                        type="button"
+                                                        @click.prevent="removeVariationRow(index)"><svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="icon icon-tabler icons-tabler-outline icon-tabler-trash"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M4 7l16 0" /><path d="M10 11l0 6" /><path d="M14 11l0 6" /><path d="M5 7l1 12a2 2 0 0 0 2 2h8a2 2 0 0 0 2 -2l1 -12" /><path d="M9 7v-3a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v3" /></svg>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        </tbody>
+                                    </table>
+                                </div>
+                                <small v-if="variationGeneralError" class="text-danger d-block mt-1" v-text="variationGeneralError"></small>
+                                <p class="text-muted mt-2 mb-0">
+                                    <small>Las variaciones se crearán al guardar el producto. Se recomienda dejar el stock inicial del producto principal en 0.</small>
+                                </p>
+                            </div>
+                        </template>
+                    </div>
+                </el-tab-pane>
+                <el-tab-pane lazy class
+                             v-if="!isService && showTab('purchase')"
+                             name="five">
+                    <span slot="label">Compra</span>
+                    <div class="row">
+                        <div v-show="!isPinned('purchase_affectation_igv_type_id') && showAffectationIgvType" class="col-md-8 field-pinnable">
+                            <div :class="{'has-danger': errors.purchase_affectation_igv_type_id}"
+                                 class="form-group">
+                                <label class="control-label">Tipo de afectación</label>
+                                <el-select v-model="form.purchase_affectation_igv_type_id"
+                                           @change="changePurchaseAffectationIgvType">
+                                    <el-option v-for="option in affectation_igv_types"
+                                               :key="option.id"
+                                               :label="option.description"
+                                               :value="option.id"></el-option>
+                                </el-select>
+                                <small v-if="errors.purchase_affectation_igv_type_id"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_affectation_igv_type_id[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('purchase_affectation_igv_type_id')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="!isPinned('purchase_unit_price')" class="col-md-4 field-pinnable">
+                            <div :class="{'has-danger': errors.purchase_unit_price}"
+                                 class="form-group">
+                                <label class="control-label">Precio Unitario <template v-if="!isNrus"><small v-if="form.purchase_has_igv">(con IGV)</small> <small v-else>(sin IGV)</small></template></label>
+                                <el-input v-model="form.purchase_unit_price"
+                                          class="input-select-all"
+                                          dusk="purchase_unit_price"
+                                          @input="calculatePercentageOfProfitByPurchase"></el-input>
+                                <small v-if="!isNrus" :style="purchaseUnitPriceBreakdown ? 'opacity: 1' : 'opacity: 0'" class="text-muted">
+                                    <template v-if="purchaseUnitPriceBreakdown">
+                                        {{ purchaseUnitPriceBreakdown }}
+                                    </template>
+                                    <template v-else>
+                                        &nbsp;
+                                    </template>
+                                </small>
+                                <small v-if="errors.purchase_unit_price"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_unit_price[0]"></small>
+                            </div>
+                            <button v-if="editingLayout" type="button" class="pin-from-form-btn" @click.prevent="pinFromForm('purchase_unit_price')"><i class="el-icon-top"></i> Fijar arriba</button>
+                        </div>
+                        <div v-show="purchase_show_has_igv && !globalIgvHandling"
+                             class="col-md-4 center-el-checkbox pt-2">
+                            <div :class="{'has-danger': errors.purchase_has_igv}"
+                                 class="form-group">
+                                <el-checkbox v-model="form.purchase_has_igv">Incluye Igv</el-checkbox>
+                                <br>
+                                <small v-if="errors.purchase_has_igv"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_has_igv[0]"></small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 center-el-checkbox pt-2">
+                            <div class="form-group">
+                                <el-checkbox v-model="enabled_percentage_of_profit"
+                                             @change="changeEnabledPercentageOfProfit">Aplica ganancia
+                                </el-checkbox>
+                                <br>
+                            </div>
+                        </div>
+                        <div class="col-md-4 pt-2">
+                            <div :class="{'has-danger': errors.percentage_of_profit}"
+                                 class="form-group">
+                                <label class="control-label">Porcentaje de ganancia (%)</label>
+                                <el-input v-model="form.percentage_of_profit"
+                                          class="input-select-all"
+                                          :disabled="!enabled_percentage_of_profit"
+                                          @input="calculatePercentageOfProfitByPercentage"></el-input>
+                                <small v-if="errors.percentage_of_profit"
+                                       class="form-control-feedback"
+                                       v-text="errors.percentage_of_profit[0]"></small>
+                            </div>
+                        </div>
+
+                        <!-- isc compras -->
+                        <div class="col-md-4" v-if="!isNrus">
+                            <div :class="{'has-danger': errors.purchase_has_isc}"
+                                 class="form-group">
+                                <el-checkbox v-model="form.purchase_has_isc"
+                                             @change="purchaseChangeIsc">Incluye ISC
+                                </el-checkbox>
+                                <br>
+                                <small v-if="errors.purchase_has_isc"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_has_isc[0]"></small>
+                            </div>
+                        </div>
+
+                        <template v-if="form.purchase_has_isc">
+                            <div class="col-md-4">
+                                <div :class="{'has-danger': errors.purchase_system_isc_type_id}"
+                                     class="form-group">
+                                    <label class="control-label">Tipo de sistema ISC</label>
+                                    <el-select
+                                        v-model="form.purchase_system_isc_type_id"
+                                        filterable>
+                                        <el-option
+                                            v-for="option in system_isc_types"
+                                            :key="option.id"
+                                            :label="option.description"
+                                            :value="option.id"
+                                        ></el-option>
+                                    </el-select>
+                                    <small
+                                        v-if="errors.purchase_system_isc_type_id"
+                                        class="form-control-feedback"
+                                        v-text="errors.purchase_system_isc_type_id[0]"></small>
+                                </div>
+                            </div>
+
+                            <div class="col-md-4">
+                                <div :class="{'has-danger': errors.purchase_percentage_isc}"
+                                     class="form-group">
+                                    <label class="control-label">Porcentaje ISC</label>
+                                    <el-input v-model="form.purchase_percentage_isc" class="input-select-all"></el-input>
+                                    <small
+                                        v-if="errors.purchase_percentage_isc"
+                                        class="form-control-feedback"
+                                        v-text="errors.purchase_percentage_isc[0]"></small>
+                                </div>
+                            </div>
+                        </template>
+                        <!-- isc compras -->
+
+                    </div>
+                </el-tab-pane>
+
+                <el-tab-pane lazy v-if="canShowExtraData && showTab('extra_info')"
+                             class
+                             name="last">
+                    <span slot="label">Informacion Adicional</span>
+                    <extra-info
+                        :form.sync="form"
+                    ></extra-info>
+                </el-tab-pane>
+
+                <el-tab-pane lazy v-if="resolvedVariant === 'restaurant'"
+                             class
+                             name="supplies">
+                    <span slot="label">Insumos</span>
+                    <supplies-tab :itemId="recordId"></supplies-tab>
+                </el-tab-pane>
+
+                <el-tab-pane lazy v-if="resolvedVariant === 'restaurant'"
+                             class
+                             name="modifiers">
+                    <span slot="label">Modificadores</span>
+                    <modifiers-tab :itemId="recordId"></modifiers-tab>
+                </el-tab-pane>
+
+                <el-tab-pane lazy class
+                             v-if="form.is_for_production && canSeeProduction && showTab('production')"
+                             name="six">
+                    <span slot="label">Producción</span>
+                    <div class="row">
+
+                        <div class="col-md-7 col-lg-7 col-xl-7 col-sm-7">
+                            <div id="custom-select"
+                                 :class="{'has-danger': errors.item_id}"
+                                 class="form-group">
+                                <label class="control-label">
+                                    Insumo
+                                </label>
+
+                                <template id="select-append">
+                                    <el-input id="custom-input">
+                                        <el-select
+                                            id="select-width"
+                                            ref="selectSearchNormal"
+                                            slot="prepend"
+                                            v-model="item_suplly"
+                                            :loading="loading_search"
+                                            :remote-method="searchRemoteItems"
+                                            filterable
+                                            placeholder="Buscar"
+                                            popper-class="el-select-items"
+                                            remote
+                                            @change="changeItem"
+                                            @focus="focusSelectItem">
+
+
+                                            <el-tooltip
+                                                v-for="option in supplyOptions"
+                                                :key="option.id"
+                                                placement="left">
+                                                <div
+                                                    slot="content"
+                                                    v-html="ItemSlotTooltipView(option)"
+                                                ></div>
+                                                <el-option
+                                                    :label="ItemOptionDescriptionView(option)"
+                                                    :value="option.id"
+                                                ></el-option>
+
+                                            </el-tooltip>
+                                        </el-select>
+                                    </el-input>
+                                </template>
+                                <small v-if="errors.item_id"
+                                       class="form-control-feedback"
+                                       v-text="errors.item_id[0]"></small>
+                            </div>
+                        </div>
+                        <div class="col-md-7 col-lg-7 col-xl-7 col-sm-7 " style="    margin-top: 1rem !important;">
+                            <div class="form-group ">
+                                <button class="btn btn-primary"
+                                        type="button"
+                                        @click.prevent="clickAddSupply" >
+                                    + Agregar Producto
+                                </button>
+                            </div>
+                        </div>
+                        <div class="col-12 table-responsive" v-if="form.supplies && form.supplies.length > 0">
+
+                            <div class="table-responsive">
+                                <table class="table">
+                                    <thead>
+                                    <tr>
+                                        <th>#</th>
+<!--                                        <th>item_id</th>-->
+                                        <th>Insumo</th>
+                                        <th>Cantidad</th>
+<!--                                        <th class="text-end">Acciones</th>-->
+                                    </tr>
+                                    </thead>
+                                    <tbody>
+                                    <tr v-for="(row, index) in form.supplies" :key="index">
+                                        <td>{{ index + 1 }}</td>
+<!--                                        <td>{{ row.item_id }}</td>-->
+                                        <td>{{ (row.individual_item)?row.individual_item.description:row.individual_item }}</td>
+                                        <td>
+                                            <el-input-number v-model="row.quantity"
+                                                      ></el-input-number>
+                                            </td>
+
+                                        <!--
+                                        <td class="text-end">
+                                            <button type="button" class="btn waves-effect waves-light btn-xs btn-info" @click.prevent="clickCreate(row.id)">Editar</button>
+
+                                            <template v-if="typeUser === 'admin'">
+                                                <button type="button" class="btn waves-effect waves-light btn-xs btn-danger"  @click.prevent="clickDelete(row.id)">Eliminar</button>
+                                            </template>
+                                        </td>
+                                        -->
+                                    </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <!--
+                        <div class="col-md-4">
+                            <div :class="{'has-danger': errors.purchase_unit_price}"
+                                 class="form-group">
+                                <label class="control-label">Precio Unitario</label>
+                                <el-input v-model="form.purchase_unit_price"
+                                          dusk="purchase_unit_price"
+                                          @input="calculatePercentageOfProfitByPurchase"></el-input>
+                                <small v-if="errors.purchase_unit_price"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_unit_price[0]"></small>
+                            </div>
+                        </div>
+                        <div v-show="purchase_show_has_igv"
+                             class="col-md-4 center-el-checkbox pt-2">
+                            <div :class="{'has-danger': errors.purchase_has_igv}"
+                                 class="form-group">
+                                <el-checkbox v-model="form.purchase_has_igv">Incluye Igv</el-checkbox>
+                                <br>
+                                <small v-if="errors.purchase_has_igv"
+                                       class="form-control-feedback"
+                                       v-text="errors.purchase_has_igv[0]"></small>
+                            </div>
+                        </div>
+                        <div class="col-md-4 center-el-checkbox pt-2">
+                            <div class="form-group">
+                                <el-checkbox v-model="enabled_percentage_of_profit"
+                                             @change="changeEnabledPercentageOfProfit">Aplica ganancia
+                                </el-checkbox>
+                                <br>
+                            </div>
+                        </div>
+                        <div class="col-md-4 pt-2">
+                            <div :class="{'has-danger': errors.percentage_of_profit}"
+                                 class="form-group">
+                                <label class="control-label">Porcentaje de ganancia (%)</label>
+                                <el-input v-model="form.percentage_of_profit"
+                                          :disabled="!enabled_percentage_of_profit"
+                                          @input="calculatePercentageOfProfitByPercentage"></el-input>
+                                <small v-if="errors.percentage_of_profit"
+                                       class="form-control-feedback"
+                                       v-text="errors.percentage_of_profit[0]"></small>
+                            </div>
+                        </div>
+                        -->
+                    </div>
+                </el-tab-pane>
+
+                <el-tab-pane lazy v-if="showTab('advanced')"
+                             class
+                             name="advanced">
+                    <span slot="label">Avanzado</span>
+
+                    <div class="advanced-section">
+                        <h6 class="advanced-section__title">Códigos</h6>
+                        <div class="row">
+                            <div class="col-md-4">
+                                <div :class="{'has-danger': errors.item_code}"
+                                     class="form-group">
+                                    <label class="control-label">Código Sunat
+                                        <el-tooltip class="item"
+                                                    content="Código proporcionado por SUNAT, campo obligatorio para exportaciones"
+                                                    effect="dark"
+                                                    placement="top">
+                                            <i class="fa fa-info-circle"></i>
+                                        </el-tooltip>
+                                    </label>
+                                    <el-input v-model="form.item_code"
+                                              maxlength="8"
+                                              dusk="item_code"></el-input>
+                                    <small v-if="errors.item_code"
+                                           class="form-control-feedback"
+                                           v-text="errors.item_code[0]"></small>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <div :class="{'has-danger': errors.factory_code}"
+                                     class="form-group">
+                                    <label class="control-label">
+                                        Código de fábrica
+                                        <el-tooltip class="item"
+                                                    content="Para habilitar la búsqueda debe realizarlo en configuración/avanzado"
+                                                    effect="dark"
+                                                    placement="top">
+                                            <i class="fa fa-info-circle"></i>
+                                        </el-tooltip>
+                                    </label>
+                                    <el-input v-model="form.factory_code"></el-input>
+                                    <small v-if="errors.factory_code"
+                                           class="form-control-feedback"
+                                           v-text="errors.factory_code[0]"></small>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-show="form.unit_type_id != 'ZZ'" class="advanced-section">
+                        <h6 class="advanced-section__title">Trazabilidad de inventario</h6>
+
+                        <div class="advanced-toggle">
+                            <div class="advanced-toggle__check">
+                                <el-checkbox v-model="form.lots_enabled"
+                                             @change="changeLotsEnabled">¿Maneja lotes?
+                                </el-checkbox>
+                            </div>
+                            <div class="advanced-toggle__fields">
+                                <template v-if="form.lots_enabled">
+                                    <el-tooltip class="item"
+                                                content="Si va a usar el mismo LOTE en otros almacenes coloque un prefijo para diferenciarlos."
+                                                effect="dark"
+                                                placement="top">
+                                        <el-input v-model="form.lot_code"
+                                                  size="small"
+                                                  placeholder="Código de lote"></el-input>
+                                    </el-tooltip>
+                                    <el-date-picker v-model="form.date_of_due"
+                                                    :clearable="true"
+                                                    size="small"
+                                                    type="date"
+                                                    placeholder="Fec. vencimiento"
+                                                    value-format="yyyy-MM-dd"></el-date-picker>
+                                    <small v-if="errors.lot_code"
+                                           class="text-danger"
+                                           v-text="errors.lot_code[0]"></small>
+                                    <small v-if="errors.date_of_due"
+                                           class="text-danger"
+                                           v-text="errors.date_of_due[0]"></small>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="advanced-toggle">
+                            <div class="advanced-toggle__check">
+                                <el-checkbox v-model="form.series_enabled"
+                                             @change="changeLotsEnabled">¿Maneja series?
+                                </el-checkbox>
+                            </div>
+                            <div class="advanced-toggle__fields">
+                                <template v-if="form.series_enabled && !recordId">
+                                    <el-button icon="el-icon-edit-outline"
+                                               size="small"
+                                               type="primary"
+                                               @click.prevent="clickLotcode">Ingrese series
+                                    </el-button>
+                                    <small v-if="errors.lot_code"
+                                           class="text-danger"
+                                           v-text="errors.lot_code[0]"></small>
+                                </template>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div v-if="!isNrus" class="advanced-section">
+                        <h6 class="advanced-section__title">Tributos y retenciones</h6>
+
+                        <div class="advanced-toggle">
+                            <div class="advanced-toggle__check">
+                                <el-checkbox v-model="form.has_perception"
+                                             @change="changeHasPerception">Incluye percepción
+                                </el-checkbox>
+                            </div>
+                            <div class="advanced-toggle__fields">
+                                <el-input v-if="form.has_perception"
+                                          v-model="form.percentage_perception"
+                                          class="input-select-all"
+                                          size="small"
+                                          placeholder="% de percepción"></el-input>
+                            </div>
+                        </div>
+
+                        <div class="advanced-toggle">
+                            <div class="advanced-toggle__check">
+                                <el-checkbox v-model="form.has_isc"
+                                             @change="changeIsc">Incluye ISC
+                                </el-checkbox>
+                            </div>
+                            <div class="advanced-toggle__fields">
+                                <template v-if="form.has_isc">
+                                    <el-select v-model="form.system_isc_type_id"
+                                               size="small"
+                                               placeholder="Tipo de sistema ISC"
+                                               filterable>
+                                        <el-option v-for="option in system_isc_types"
+                                                   :key="option.id"
+                                                   :label="option.description"
+                                                   :value="option.id"></el-option>
+                                    </el-select>
+                                    <el-input v-model="form.percentage_isc"
+                                              class="input-select-all"
+                                              size="small"
+                                              placeholder="% de ISC"></el-input>
+                                    <small v-if="errors.system_isc_type_id"
+                                           class="text-danger"
+                                           v-text="errors.system_isc_type_id[0]"></small>
+                                    <small v-if="errors.percentage_isc"
+                                           class="text-danger"
+                                           v-text="errors.percentage_isc[0]"></small>
+                                </template>
+                            </div>
+                        </div>
+
+                        <div class="advanced-toggle">
+                            <div class="advanced-toggle__check">
+                                <el-checkbox v-model="form.subject_to_detraction">Sujeto a detracción</el-checkbox>
+                            </div>
+                            <div class="advanced-toggle__fields">
+                                <small v-if="errors.subject_to_detraction"
+                                       class="text-danger"
+                                       v-text="errors.subject_to_detraction[0]"></small>
+                            </div>
+                        </div>
+                    </div>
+                </el-tab-pane>
+            </el-tabs>
+            <div class="form-actions text-end pt-2 mt-2" v-if="!editingLayout">
+                <template v-if="forOnlyShowAllDetails">
+                    <el-button class="second-buton" @click.prevent="close()">Cerrar</el-button>
+                </template>
+                <template v-else>
+                    <el-button class="second-buton me-2" @click.prevent="close()">Cancelar</el-button>
+                    <el-button :loading="loading_submit"
+                            native-type="submit"
+                            type="primary">Guardar
+                    </el-button>
+                </template>
+            </div>
+        </form>
+
+        <lots-form
+            :lots="form.lots"
+            :recordId="recordId"
+            :showDialog.sync="showDialogLots"
+            :stock="form.stock"
+            @addRowLot="addRowLot">
+        </lots-form>
+
+        <variation-picker
+            :showDialog.sync="showDialogVariationPicker"
+            :product-variables="product_variables"
+            :selected-variable-ids="selected_variable_ids"
+            @apply="applyVariationSelection">
+        </variation-picker>
+
+    </el-dialog>
+</template>
+
+<script>
+import LotsForm from './partials/lots.vue'
+import ExtraInfo from './partials/extra_info.vue'
+import ItemFormPinnedBar from './_pinned_bar.vue'
+import { getDefaultLayout, getAvailableFields } from './_form_fields_catalog'
+import SuppliesTab from "@viewsModuleRestaurant/items/supplies-tab.vue";
+import ModifiersTab from "@viewsModuleRestaurant/items/modifiers-tab.vue";
+import VariationPicker from "./partials/variation_picker.vue";
+import ItemImagesManager from "./partials/images_manager.vue";
+import {mapActions, mapState} from "vuex";
+import {ItemOptionDescription, ItemSlotTooltip} from "../../../helpers/modal_item";
+import ItemPricesTable from "@components/items/partials/ItemPricesTable.vue";
+
+
+const ALLOWED_VARIANTS = ['standard', 'ecommerce', 'restaurant']
+
+// Cada opción del buscador de insumos lleva su propio el-tooltip (una instancia
+// de Vue más su popper). El formulario es un solo componente: cualquier clic lo
+// vuelve a renderizar y fuerza a re-renderizar todos esos tooltips. Con cientos
+// de productos en la lista cada clic tardaba varios segundos.
+const SUPPLY_OPTIONS_LIMIT = 50
+
+const TABS_BY_VARIANT = {
+    standard:   ['general', 'warehouses', 'presentations', 'attributes', 'purchase', 'extra_info', 'production', 'advanced'],
+    ecommerce:  ['general', 'extra_info', 'advanced'],
+    restaurant: ['general', 'supplies', 'modifiers', 'imagen', 'advanced'],
+}
+
+export default {
+    props: {
+        showDialog: { default: false },
+        recordId: { default: null },
+        external: { default: false },
+        type: { default: null },
+        pharmacy: { default: false },
+        onlyShowAllDetails: { default: null },
+        input_item: { default: null },
+        variant: {
+            type: String,
+            default: 'standard',
+            validator: (v) => ALLOWED_VARIANTS.includes(v),
+        },
+    },
+    components: {
+        LotsForm,
+        ExtraInfo,
+        ItemPricesTable,
+        ItemFormPinnedBar,
+        SuppliesTab,
+        ModifiersTab,
+        VariationPicker,
+        ItemImagesManager,
+    },
+    computed: {
+        supplyOptions() {
+            return this.items.slice(0, SUPPLY_OPTIONS_LIMIT)
+        },
+        imageUploadHint() {
+            const max_mb = (this.max_image_size_kb / 1024).toFixed(1).replace('.0', '')
+
+            return `Formatos: JPG, PNG, GIF, WEBP o SVG. Peso máximo: ${max_mb}MB`
+        },
+        resolvedVariant() {
+            return ALLOWED_VARIANTS.includes(this.variant) ? this.variant : 'standard'
+        },
+        pinnedKeysSet() {
+            return new Set((this.pinned_fields || []).map(p => p.field_key))
+        },
+        selectedVariables() {
+            return this.product_variables.filter(v => this.selected_variable_ids.includes(v.id))
+        },
+        combinationsCount() {
+            const variables = this.selectedVariables
+            if (variables.length === 0) return 0
+            return variables.reduce((total, variable) => {
+                return total * ((this.selected_values[variable.id] || []).length)
+            }, 1)
+        },
+        combinationsDetail() {
+            const variables = this.selectedVariables
+            if (variables.length === 0) return null
+            return variables
+                .map(variable => `${(this.selected_values[variable.id] || []).length} ${variable.name}`)
+                .join(' × ')
+        },
+        variationGeneralError() {
+            const messages = this.variation_errors['variations']
+            return (messages && messages.length) ? messages[0] : null
+        },
+        showAffectationIgvType() {
+            return this.affectation_igv_types.length > 1
+        },
+        forOnlyShowAllDetails()
+        {
+            if(this.onlyShowAllDetails != undefined && this.onlyShowAllDetails != null) return this.onlyShowAllDetails
+
+            return false
+        },
+        ...mapState([
+            'colors',
+            'CatItemSize',
+            'CatItemUnitsPerPackage',
+            'CatItemMoldProperty',
+            'CatItemUnitBusiness',
+            'CatItemStatus',
+            'CatItemPackageMeasurement',
+            'CatItemMoldCavity',
+            'CatItemProductFamily',
+            'config',
+        ]),
+        isService: function () {
+            // Tener en cuenta que solo oculta las pestañas para tipo servicio.
+            if (this.form !== undefined) {
+                // Es servicio por selección
+                if (this.form.unit_type_id !== undefined && this.form.unit_type_id === 'ZZ') {
+                    if (
+                        this.activeName == 'second' ||
+                        this.activeName == 'third' ||
+                        this.activeName == 'five'
+                    ) {
+                        this.activeName = null;
+                        this.lastClickedTab = null;
+                    }
+                    return true;
+                }
+            }
+            return false;
+        },
+        canSeeProduction:function(){
+            if(this.config && this.config.production_app) return this.config.production_app
+            return false;
+        },
+        requireSupply:function(){
+
+            if(this.form.is_for_production) {
+
+                if( this.form.is_for_production == true) return true
+            };
+            return false;
+        },
+
+        canShowExtraData: function () {
+            if (this.config && this.config.show_extra_info_to_item !== undefined) {
+                return this.config.show_extra_info_to_item;
+            }
+            return false;
+        },
+        showPharmaElement() {
+
+            if (this.fromPharmacy === true) return true;
+            if (this.config.is_pharmacy === true) return true;
+            return false;
+        },
+        showPointSystem()
+        {
+            if(this.config) return this.config.enabled_point_system
+
+            return false
+        },
+        showRestrictSaleItemsCpe()
+        {
+            if(this.config) return this.config.restrict_sale_items_cpe
+
+            return false
+        },
+        globalIgvHandling()
+        {
+            if (this.config && this.config.global_igv_handling !== undefined) {
+                return !!this.config.global_igv_handling
+            }
+            return true
+        },
+        isNrus()
+        {
+            return !!(this.config && this.config.is_nrus)
+        },
+        saleUnitPriceBreakdown()
+        {
+            const price = parseFloat(this.form.sale_unit_price)
+            if (!price || price <= 0) return null
+            const symbol = this.getCurrencySymbol()
+            const IGV_RATE = 0.18
+            let base, igv, total
+            if (this.form.has_igv) {
+                total = price
+                base = price / (1 + IGV_RATE)
+                igv = total - base
+            } else {
+                base = price
+                igv = price * IGV_RATE
+                total = price + igv
+            }
+            return `${base.toFixed(2)} + ${igv.toFixed(2)} IGV = ${symbol} ${total.toFixed(2)}`
+        },
+        purchaseUnitPriceBreakdown()
+        {
+            const price = parseFloat(this.form.purchase_unit_price)
+            if (!price || price <= 0) return null
+            const symbol = this.getCurrencySymbol()
+            const IGV_RATE = 0.18
+            let base, igv, total
+            if (this.form.purchase_has_igv) {
+                total = price
+                base = price / (1 + IGV_RATE)
+                igv = total - base
+            } else {
+                base = price
+                igv = price * IGV_RATE
+                total = price + igv
+            }
+            return `${base.toFixed(2)} + ${igv.toFixed(2)} IGV = ${symbol} ${total.toFixed(2)}`
+        }
+
+    },
+
+    data() {
+        return {
+            // Debe coincidir con ItemController::MAX_IMAGE_SIZE_KB
+            max_image_size_kb: 2048,
+            allowed_image_types: ['image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp', 'image/svg+xml'],
+            gallery: [],
+            max_images: 8,
+            gallery_key: 0,
+            loading_search: false,
+            showDialogLots: false,
+            form_category: {add: false, name: null, id: null},
+            form_brand: {add: false, name: null, id: null},
+            warehouses: [],
+            items: [],
+            loading_submit: false,
+            categorySearchQuery: '',
+            filteredCategories: [],
+            brandSearchQuery: '',
+            filteredBrands: [],
+            showPercentagePerception: false,
+            has_percentage_perception: false,
+            percentage_perception: null,
+            enabled_percentage_of_profit: false,
+            titleDialog: null,
+            resource: 'items',
+            errors: {},
+            item_suplly: {},
+            headers: headers_token,
+            form: {
+                item_supplies:[],
+                is_for_production:false,
+            },
+            // configuration: {},
+            unit_types: [],
+            currency_types: [],
+            system_isc_types: [],
+            affectation_igv_types: [],
+            categories: [],
+            brands: [],
+            accounts: [],
+            show_has_igv: true,
+            purchase_show_has_igv: true,
+            have_account: false,
+            item_unit_type: {
+                id: null,
+                unit_type_id: null,
+                quantity_unit: 0,
+                price1: 0,
+                price2: 0,
+                price3: 0,
+                price_default: 2,
+
+            },
+            attribute_types: [],
+            product_variables: [],
+            selected_variable_ids: [],
+            selected_values: {},
+            variation_rows: [],
+            existing_variations: [],
+            variation_errors: {},
+            showDialogVariationPicker: false,
+            activeName: null,
+            lastClickedTab: null,
+            fromPharmacy: false,
+            inventory_configuration: null,
+            next_internal_id: null,
+            pinned_fields: [],
+            layout_saving: false,
+            editingLayout: false,
+            preparation_areas: [],
+        }
+    },
+    async created() {
+        this.loadConfiguration()
+        if (this.pharmacy !== undefined && this.pharmacy == true) {
+            this.fromPharmacy = true;
+        }
+        await this.initForm();
+        this.loadLayout();
+
+        // Cargar las area de preparación
+        await this.$http.get(`/restaurant/preparation-areas`).then(response => {
+            this.preparation_areas = response.data.data
+        })
+
+        await this.$http.get(`/${this.resource}/tables`)
+            .then(response => {
+                let data = response.data;
+                this.unit_types = data.unit_types
+                this.accounts = data.accounts
+                this.currency_types = data.currency_types
+                this.system_isc_types = data.system_isc_types
+                this.affectation_igv_types = data.affectation_igv_types
+                this.warehouses = data.warehouses
+                this.categories = data.categories
+                this.brands = data.brands
+                this.attribute_types = data.attribute_types
+                this.product_variables = data.product_variables || []
+                // this.config = data.configuration
+                if (this.canShowExtraData) {
+                    this.$store.commit('setColors', data.colors);
+                    this.$store.commit('setCatItemSize', data.CatItemSize);
+                    this.$store.commit('setCatItemUnitsPerPackage', data.CatItemUnitsPerPackage);
+                    this.$store.commit('setCatItemStatus', data.CatItemStatus);
+                    this.$store.commit('setCatItemMoldCavity', data.CatItemMoldCavity);
+                    this.$store.commit('setCatItemMoldProperty', data.CatItemMoldProperty);
+                    this.$store.commit('setCatItemUnitBusiness', data.CatItemUnitBusiness);
+                    this.$store.commit('setCatItemPackageMeasurement', data.CatItemPackageMeasurement);
+                    this.$store.commit('setCatItemProductFamily', data.CatItemPackageMeasurement);
+                }
+                this.$store.commit('setConfiguration', data.configuration);
+
+
+                this.loadConfiguration()
+                // Solo para producto nuevo. created() y create() corren por
+                // separado (el diálogo dispara create con @open), así que al
+                // editar esto puede resolverse DESPUÉS de cargar el registro y
+                // borrar la afectación guardada del ítem.
+                if (!this.recordId) {
+                    this.form.sale_affectation_igv_type_id = this.defaultSaleAffectationIgvTypeId()
+                    this.form.purchase_affectation_igv_type_id = (this.affectation_igv_types.length > 0) ? this.affectation_igv_types[0].id : null
+                }
+                if (!this.recordId && this.currency_types.length === 1) {
+                    this.form.currency_type_id = this.currency_types[0].id
+                }
+                this.inventory_configuration = data.inventory_configuration;
+                this.next_internal_id = data.next_internal_id || null;
+                if (!this.recordId && this.inventory_configuration && this.inventory_configuration.generate_internal_id && !this.form.internal_id) {
+                    this.form.internal_id = this.next_internal_id;
+                }
+                this.filteredCategories = this.categories;
+                this.filteredBrands = this.brands;
+            })
+
+        this.$eventHub.$on('submitPercentagePerception', (data) => {
+            this.form.percentage_perception = data
+            if (!this.form.percentage_perception) this.has_percentage_perception = false
+        })
+
+        this.$eventHub.$on('reloadTables', () => {
+            this.reloadTables()
+        })
+
+        await this.setDefaultConfiguration()
+
+        this.$eventHub.$on('establishmentChanged', () => {
+            this.loadCurrentEstablishment();
+        });
+
+    },
+    beforeDestroy() {
+        this.$eventHub.$off('establishmentChanged');
+    },
+
+    watch: {
+        'form.unit_type_id'(newValue) {
+            if (!this.config.enable_list_product && this.form.item_unit_types.length > 0) {
+                const selectedUnit = this.unit_types.find(u => u.id === newValue);
+                const unitDescription = selectedUnit ? selectedUnit.description : '';
+
+                this.form.item_unit_types.forEach(item => {
+                    if (!item.id) {
+                        item.unit_type_id = newValue;
+                        item.description = unitDescription;
+                        item.quantity_unit = 1;
+                    }
+                });
+            }
+        }
+    },
+
+    methods: {
+        selectInputOnFocus(event) {
+            const target = event.target
+            if (!target || target.tagName !== 'INPUT') {
+                return
+            }
+            if (target.type === 'checkbox' || target.type === 'radio' || target.type === 'file') {
+                return
+            }
+            if (target.type === 'number' || target.closest('.el-input-number') || target.closest('.input-select-all')) {
+                this.$nextTick(() => target.select())
+            }
+        },
+        getCurrencySymbol() {
+            return this.form.currency_type_id === 'USD' ? '$' : 'S/'
+        },
+        ...mapActions([
+            'loadConfiguration',
+        ]),
+        handleTabClick(tab) {
+            if (this.lastClickedTab === tab.name) {
+                this.activeName = null;
+                this.lastClickedTab = null;
+            } else {
+                this.lastClickedTab = tab.name;
+            }
+        },
+        stripHtml(html) {
+            if (!html) return html
+            return html.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+        },
+        /**
+         * Toggle para mostrar/ocultar precios de una presentación
+         */
+        togglePrices(index) {
+            const currentValue = this.form.item_unit_types[index].showPrices || false;
+            this.$set(
+                this.form.item_unit_types[index],
+                'showPrices',
+                !currentValue
+            );
+        },
+        /**
+         * Valores por defecto de un producto NUEVO.
+         *
+         * Al editar no debe tocar el formulario: el registro ya trae sus propios
+         * valores y este método puede resolverse después de cargarlo (created()
+         * y create() son flujos independientes), pisando la afectación y el IGV
+         * guardados del ítem.
+         *
+         * Devuelve la promesa para que el `await` de created() sirva de algo; sin
+         * el return resolvía al instante y el .then caía más tarde, fuera de orden.
+         *
+         * @param {boolean} force  resetForm() lo llama con true: ahí el formulario
+         *                         se está vaciando y sí queremos los defaults
+         *                         aunque recordId siga apuntando al ítem anterior.
+         */
+        defaultSaleAffectationIgvTypeId() {
+            const configured = this.config?.affectation_igv_type_id
+
+            // Se exige que siga activo en el catalogo; si no, el select quedaria
+            // sin opcion seleccionada.
+            if (configured && _.find(this.affectation_igv_types, {id: String(configured)})) {
+                return String(configured)
+            }
+
+            return (this.affectation_igv_types.length > 0) ? this.affectation_igv_types[0].id : null
+        },
+        async setDefaultConfiguration(force = false) {
+            const apply_defaults = force || !this.recordId
+
+            if (apply_defaults) {
+                // Valor provisional mientras llega la configuración del servidor.
+                // El store puede venir en null (sin `config` en localStorage) o con
+                // el objeto por defecto, donde affectation_igv_type_id es 0: por eso
+                // el fallback va sobre el valor y no sobre la existencia de config.
+                this.form.sale_affectation_igv_type_id = this.config?.affectation_igv_type_id || '10'
+            }
+
+            return await this.$http.get(`/configurations/record`).then(response => {
+                const configuration = response.data.data || {}
+                const isGlobal = configuration.global_igv_handling !== false
+                if (apply_defaults) {
+                    // La respuesta manda sobre el store: es el dato fresco.
+                    this.form.sale_affectation_igv_type_id = configuration.affectation_igv_type_id
+                        || this.config?.affectation_igv_type_id
+                        || '10'
+                    this.form.has_igv = isGlobal ? true : configuration.include_igv
+                    this.form.purchase_has_igv = isGlobal ? true : configuration.include_igv
+                }
+                // this.$setStorage('configuration',response.data.data)
+                // Solo se comitea si hay dato: la mutación asigna tal cual, y un
+                // null quedaría guardado en localStorage arrastrando el problema.
+                if (response.data.data) {
+                    this.$store.commit('setConfiguration', response.data.data);
+                    this.loadConfiguration()
+                }
+            })
+        },
+        purchaseChangeIsc() {
+
+            if (!this.form.purchase_has_isc) {
+                this.form.purchase_system_isc_type_id = null
+                this.form.purchase_percentage_isc = 0
+            }
+
+        },
+        changeIsc() {
+
+            if (!this.form.has_isc) {
+                this.form.system_isc_type_id = null
+                this.form.percentage_isc = 0
+            }
+
+        },
+        clickAddAttribute() {
+            this.form.attributes.push({
+                attribute_type_id: null,
+                description: null,
+                value: null,
+                start_date: null,
+                end_date: null,
+                duration: null,
+            })
+        },
+        async reloadTables() {
+            await this.$http.get(`/${this.resource}/tables`)
+                .then(response => {
+                    this.unit_types = response.data.unit_types
+                    this.accounts = response.data.accounts
+                    this.currency_types = response.data.currency_types
+                    this.system_isc_types = response.data.system_isc_types
+                    this.affectation_igv_types = response.data.affectation_igv_types
+                    this.warehouses = response.data.warehouses
+                    this.categories = response.data.categories
+                    this.brands = response.data.brands
+                    this.filteredCategories = this.categories
+                    this.filteredBrands = this.brands
+
+                    // Sin el guard, recargar tablas en medio de una edición
+                    // (p. ej. al crear una marca desde el sub-diálogo, que emite
+                    // 'reloadTables') reseteaba la afectación del ítem editado.
+                    if (!this.recordId) {
+                        this.form.sale_affectation_igv_type_id = this.defaultSaleAffectationIgvTypeId()
+                        this.form.purchase_affectation_igv_type_id = (this.affectation_igv_types.length > 0) ? this.affectation_igv_types[0].id : null
+                    }
+                    if (!this.recordId && this.currency_types.length === 1) {
+                        this.form.currency_type_id = this.currency_types[0].id
+                    }
+                })
+        },
+        changeLotsEnabled() {
+
+            // if(!this.form.lots_enabled){
+            //     this.form.lot_code = null
+            //     this.form.lots = []
+            // }
+
+        },
+        openVariationPicker() {
+            this.reloadProductVariables()
+            this.showDialogVariationPicker = true
+        },
+        applyVariationSelection(selection) {
+            this.selected_variable_ids = selection.selected_variable_ids
+            this.selected_variable_ids.forEach(variableId => {
+                if (!this.selected_values[variableId]) {
+                    this.$set(this.selected_values, variableId, [])
+                }
+            })
+        },
+        setVariableValues(variableId, valueIds) {
+            this.$set(this.selected_values, variableId, valueIds || [])
+        },
+        // Element no expone slot para los tags del select: los colores viajan como
+        // variables CSS (--pv-dot-N) y el estilo los pinta por posición del tag
+        selectedColorVars(variable) {
+            if (variable.value_type !== 'color') {
+                return {}
+            }
+            const vars = {}
+            ;(this.selected_values[variable.id] || []).forEach((valueId, index) => {
+                const value = variable.values.find(v => v.id === valueId)
+                vars[`--pv-dot-${index + 1}`] = (value && value.color) || 'transparent'
+            })
+            return vars
+        },
+        abbreviateVariationValue(text) {
+            const clean = String(text).normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-zA-Z0-9]/g, '')
+            return (clean.length <= 3 ? clean : clean.slice(0, 3)).toUpperCase()
+        },
+        generateCombinations() {
+            if (!this.form.internal_id || !this.form.description || !(parseFloat(this.form.sale_unit_price) > 0)) {
+                return this.$message.warning('Completa el código interno, nombre y precio unitario del producto antes de generar combinaciones')
+            }
+
+            if (this.variation_rows.length > 0) {
+                this.$confirm('Se reemplazará el listado de combinaciones actual. ¿Continuar?', 'Confirmar', {
+                    confirmButtonText: 'Reemplazar',
+                    cancelButtonText: 'Cancelar',
+                    type: 'warning'
+                }).then(() => {
+                    this.buildVariationRows()
+                }).catch(() => {
+                })
+            } else {
+                this.buildVariationRows()
+            }
+        },
+        buildVariationRows() {
+            let combos = [[]]
+            this.selectedVariables.forEach(variable => {
+                const values = variable.values.filter(v => (this.selected_values[variable.id] || []).includes(v.id))
+                combos = combos.flatMap(combo => values.map(v => [...combo, v]))
+            })
+
+            this.variation_rows = combos.map(combo => ({
+                label: combo.map(v => v.value).join(' / '),
+                colors: combo.filter(v => v.color).map(v => v.color),
+                variable_value_ids: combo.map(v => v.id),
+                internal_id: `${this.form.internal_id}-${combo.map(v => this.abbreviateVariationValue(v.value)).join('-')}`.slice(0, 30),
+                barcode: '',
+                sale_unit_price: this.form.sale_unit_price,
+                stock: 0,
+                // sin imagen propia, la variación hereda la del producto principal
+                image: null,
+                image_url: null,
+                temp_path: null,
+            }))
+            this.variation_errors = {}
+        },
+        removeVariationRow(index) {
+            this.variation_rows.splice(index, 1)
+        },
+        onVariationImageSuccess(response, row) {
+            if (!response.success) {
+                return this.$message.error(response.message)
+            }
+            row.image = response.data.filename
+            row.image_url = response.data.temp_image
+            row.temp_path = response.data.temp_path
+        },
+        async onExistingVariationImageSuccess(response, row) {
+            if (!response.success) {
+                return this.$message.error(response.message)
+            }
+
+            try {
+                const { data } = await this.$http.post(`/items/${this.form.id}/variations/${row.id}/image`, {
+                    image: response.data.filename,
+                    temp_path: response.data.temp_path,
+                })
+
+                if (!data.success) {
+                    return this.$message.error(data.message || 'No se pudo actualizar la imagen')
+                }
+
+                row.image_url = data.data.image_url
+                row.has_own_image = data.data.has_own_image
+                this.$message.success(data.message)
+            } catch (error) {
+                this.$message.error(error.response?.data?.message || 'Error inesperado al actualizar la imagen')
+            }
+        },
+        removeVariationImage(row) {
+            row.image = null
+            row.image_url = null
+            row.temp_path = null
+        },
+        variationError(index, field) {
+            const messages = this.variation_errors[`variations.${index}.${field}`]
+            return (messages && messages.length) ? messages[0] : null
+        },
+        async submitVariationsBulk(parentId) {
+            const payload = {
+                variations: this.variation_rows.map(row => ({
+                    internal_id: row.internal_id,
+                    barcode: row.barcode ? row.barcode : null,
+                    sale_unit_price: row.sale_unit_price,
+                    stock: row.stock || 0,
+                    variable_value_ids: row.variable_value_ids,
+                    image: row.image || null,
+                    temp_path: row.temp_path || null,
+                })),
+            }
+
+            try {
+                const response = await this.$http.post(`/items/${parentId}/variations/bulk`, payload)
+                if (response.data.success) {
+                    this.$message.success(response.data.message)
+                    this.variation_rows = []
+                    this.variation_errors = {}
+                    return true
+                }
+                this.$message.error(response.data.message || 'No se pudieron crear las variaciones')
+                return false
+            } catch (error) {
+                if (error.response?.status === 422) {
+                    this.variation_errors = error.response.data.errors || error.response.data || {}
+                } else if (error.response?.data?.message) {
+                    this.$message.error(error.response.data.message)
+                } else {
+                    this.$message.error('Error inesperado al crear las variaciones')
+                }
+                return false
+            }
+        },
+        loadExistingVariations() {
+            if (!this.form.id) return
+            this.$http.get(`/items/${this.form.id}/variations`).then(response => {
+                this.existing_variations = response.data.data || []
+            })
+        },
+        reloadProductVariables() {
+            this.$http.get('/product-variables/records?active=1').then(response => {
+                this.product_variables = response.data.data || []
+            })
+        },
+        changeProductioTab(){
+
+        },
+        addRowLot(lots) {
+            this.form.lots = lots
+        },
+        clickLotcode() {
+            this.showDialogLots = true
+        },
+        changeHaveAccount() {
+            if (!this.have_account) this.form.account_id = null
+        },
+        changeEnabledPercentageOfProfit() {
+            // if(!this.enabled_percentage_of_profit) this.form.percentage_of_profit = 0
+        },
+        clickDelete(id) {
+
+            this.$http.delete(`/${this.resource}/item-unit-type/${id}`)
+                .then(res => {
+                    if (res.data.success) {
+                        this.loadRecord()
+                        this.$message.success('Se eliminó correctamente el registro')
+                    }
+                })
+                .catch(error => {
+                    if (error.response.status === 500) {
+                        this.$message.error('Error al intentar eliminar');
+                    } else {
+                        console.log(error.response.data.message)
+                    }
+                })
+
+        },
+        changeHasPerception() {
+            if (!this.form.has_perception) {
+                this.form.percentage_perception = null
+            }
+        },
+        clickAddRow() {
+            let unitTypeId = 'NIU';
+            let description = null;
+            let quantityUnit = 0;
+
+            if (!this.config.enable_list_product) {
+                unitTypeId = this.form.unit_type_id;
+                const selectedUnit = this.unit_types.find(u => u.id === unitTypeId);
+                description = selectedUnit ? selectedUnit.description : null;
+                quantityUnit = 1;
+            }
+
+            this.form.item_unit_types.push({
+                id: null,
+                description: description,
+                unit_type_id: unitTypeId,
+                quantity_unit: quantityUnit,
+                price1: 0,
+                price2: 0,
+                price3: 0,
+                price_default: 2,
+                barcode: null,
+                showPrices: false,
+                prices: []
+            })
+        },
+        clickCancel(index) {
+            this.form.item_unit_types.splice(index, 1)
+        },
+        initForm() {
+            this.loading_submit = false,
+            this.errors = {}
+
+            this.form = {
+                id: null,
+                colors: [],
+                item_type_id: '01',
+                internal_id: null,
+                item_code: null,
+                item_code_gs1: null,
+                description: null,
+                name: null,
+                second_name: null,
+                unit_type_id: 'NIU',
+                currency_type_id: 'PEN',
+                sale_unit_price: 0,
+                purchase_unit_price: 0,
+                has_isc: false,
+                system_isc_type_id: null,
+                percentage_isc: 0,
+                suggested_price: 0,
+                sale_affectation_igv_type_id: null,
+                purchase_affectation_igv_type_id: null,
+                calculate_quantity: false,
+                stock: 0,
+                stock_min: 1,
+                has_igv: true,
+                has_perception: false,
+                item_unit_types: [],
+                percentage_of_profit: 0,
+                percentage_perception: null,
+                image: null,
+                image_url: null,
+                temp_path: null,
+                is_set: false,
+                parent_item_id: null,
+                account_id: null,
+                category_id: null,
+                brand_id: null,
+                date_of_due: null,
+                lot_code: null,
+                line: null,
+                lots_enabled: false,
+                lots: [],
+                attributes: [],
+                series_enabled: false,
+                purchase_has_igv: true,
+                web_platform_id: null,
+                has_plastic_bag_taxes: false,
+                item_warehouse_prices: [],
+                item_supplies:[],
+
+                purchase_has_isc: false,
+                purchase_system_isc_type_id: null,
+                purchase_percentage_isc: 0,
+                subject_to_detraction: false,
+
+                exchange_points: false,
+                quantity_of_points: 0,
+                factory_code: null,
+                restrict_sale_cpe: false,
+                warehouse_id: null,
+
+                preparation_area_id: null,
+                preparation_area: null,
+
+            }
+
+            this.show_has_igv = true
+            this.purchase_show_has_igv = true
+            this.enabled_percentage_of_profit = false
+            this.selected_variable_ids = []
+            this.selected_values = {}
+            this.variation_rows = []
+            this.existing_variations = []
+            this.variation_errors = {}
+            this.gallery = []
+            this.gallery_key++
+            this.loadCurrentEstablishment()
+        },
+        changePreparationArea() {
+            const selectedArea = this.preparation_areas.find(area => area.id === this.form.preparation_area_id);
+            this.form.preparation_area = selectedArea ? selectedArea.description : null;
+        },
+        beforeUploadImage(file) {
+            if (!this.allowed_image_types.includes(file.type)) {
+                this.$message.error('Formato de imagen no válido. Use JPG, PNG, GIF, WEBP o SVG.')
+                return false
+            }
+
+            if ((file.size / 1024) > this.max_image_size_kb) {
+                const max_mb = (this.max_image_size_kb / 1024).toFixed(1)
+                this.$message.error(`La imagen excede los ${max_mb}MB. Reduzca el tamaño e intente nuevamente.`)
+                return false
+            }
+
+            return true
+        },
+        buildGallery(rows) {
+            const gallery = (this.form.image && this.form.image !== 'imagen-no-disponible.jpg')
+                ? [{ key: 'current', source: 'current', url: this.form.image_url }]
+                : []
+
+            return gallery.concat(rows.map(row => ({ key: `saved-${row.id}`, source: 'saved', id: row.id, url: row.url })))
+        },
+        loadGallery(item_id) {
+            this.gallery = this.buildGallery([])
+
+            return this.$http.get(`/${this.resource}/images/${item_id}`)
+                .then(response => {
+                    if (this.form.id != item_id) return
+
+                    const uploaded = this.gallery.filter(image => image.source === 'new')
+                    this.gallery = this.buildGallery(response.data.data).concat(uploaded)
+                })
+        },
+        async refreshGallery(item_id) {
+            const { data } = await this.$http.get(`/${this.resource}/record/${item_id}`)
+
+            if (this.form.id != item_id) return
+
+            this.form.image = data.data.image
+            this.form.image_url = data.data.image_url
+            this.form.temp_path = null
+
+            await this.loadGallery(item_id)
+        },
+        addGalleryImage(image) {
+            this.gallery.push(image)
+        },
+        removeGalleryImage(index) {
+            this.gallery.splice(index, 1)
+        },
+        reorderGallery(gallery) {
+            this.gallery = gallery
+        },
+        makeMainGalleryImage(index) {
+            const [image] = this.gallery.splice(index, 1)
+
+            this.gallery.unshift(image)
+        },
+        changeAffectationIgvType() {
+
+            let affectation_igv_type_exonerated = [20, 21, 30, 31, 32, 33, 34, 35, 36, 37]
+            let is_exonerated = affectation_igv_type_exonerated.includes((parseInt(this.form.sale_affectation_igv_type_id)));
+
+            if (is_exonerated) {
+                this.show_has_igv = false
+                this.form.has_igv = true
+            } else {
+                this.show_has_igv = true
+            }
+
+        },
+        changePurchaseAffectationIgvType() {
+
+            let affectation_igv_type_exonerated = [20, 21, 30, 31, 32, 33, 34, 35, 36, 37]
+            let is_exonerated = affectation_igv_type_exonerated.includes((parseInt(this.form.purchase_affectation_igv_type_id)));
+
+            if (is_exonerated) {
+                this.purchase_show_has_igv = false
+                this.form.purchase_has_igv = true
+            } else {
+                this.purchase_show_has_igv = true
+            }
+
+        },
+        resetForm() {
+            this.initForm()
+            this.form.sale_affectation_igv_type_id = this.defaultSaleAffectationIgvTypeId()
+            this.form.purchase_affectation_igv_type_id = (this.affectation_igv_types.length > 0) ? this.affectation_igv_types[0].id : null
+            // force: el formulario se está vaciando, aquí sí toca aplicar los
+            // defaults aunque recordId siga apuntando al ítem que se cerró.
+            this.setDefaultConfiguration(true)
+        },
+        setDialogTitle()
+        {
+            if(this.forOnlyShowAllDetails)
+            {
+                this.titleDialog = 'Ver Producto'
+            }
+            else
+            {
+                this.titleDialog = (this.recordId) ? 'Editar Producto' : 'Nuevo Producto'
+            }
+        },
+
+        async create() {
+            // console.log(this.warehouses)
+            // this.warehouses = this.warehouses.map(w => {
+            //     delete w.price;
+            //     return w;
+            // });
+this.activeName = null
+            this.lastClickedTab = null
+            if (this.type) {
+                if (this.type !== 'PRODUCTS') {
+                    this.form.unit_type_id = 'ZZ';
+                }
+            }
+
+            this.setDialogTitle()
+
+            this.setDataToItemWarehousePrices()
+
+            // El modal permanece montado entre aperturas. Si las marcas fueron
+            // creadas después de inicializarlo, hay que refrescar sus opciones.
+            if (this.warehouses.length === 0 || this.brands.length === 0) {
+                await this.reloadTables();
+            }
+
+            this.setDialogTitle();
+
+            if (this.recordId) {
+                await this.$http.get(`/${this.resource}/record/${this.recordId}`)
+                    .then(response => {
+                        this.form = response.data.data;
+                        this.form.brand_id = this.form.brand_id
+                            ? Number(this.form.brand_id)
+                            : null;
+                        this.has_percentage_perception = (this.form.percentage_perception) ? true : false;
+
+                        this.enabled_percentage_of_profit = parseFloat(this.form.percentage_of_profit) > 0;
+
+                        if (this.globalIgvHandling) {
+                            this.form.has_igv = true;
+                            this.form.purchase_has_igv = true;
+                        }
+
+                        this.changeAffectationIgvType();
+                        this.changePurchaseAffectationIgvType();
+                        this.loadExistingVariations();
+                        this.loadGallery(this.form.id);
+                    });
+            } else {
+
+                this.loadCurrentEstablishment();
+                if (this.external && this.input_item && typeof this.input_item === 'string') {
+                    this.form.description = this.input_item;
+                }
+                if (this.inventory_configuration && this.inventory_configuration.generate_internal_id && this.next_internal_id) {
+                    this.form.internal_id = this.next_internal_id;
+                }
+            }
+
+         this.setDataToItemWarehousePrices();
+         // Función para recargar validaciones para afectaciones que han sido establecidos por defecto en configuración
+         this.changeAffectationIgvType();
+
+        },
+        setDataToItemWarehousePrices() {
+
+            this.warehouses.forEach(warehouse => {
+
+                let item_warehouse_price = _.find(this.form.item_warehouse_prices, {warehouse_id: warehouse.id})
+
+                if (!item_warehouse_price) {
+
+                    this.form.item_warehouse_prices.push({
+                        id: null,
+                        item_id: null,
+                        warehouse_id: warehouse.id,
+                        price: null,
+                        description: warehouse.description,
+                    })
+                }
+
+            });
+
+            this.form.item_warehouse_prices = _.orderBy(this.form.item_warehouse_prices, ['warehouse_id'])
+
+        },
+        loadRecord() {
+            if (this.recordId) {
+                this.$http.get(`/${this.resource}/record/${this.recordId}`)
+                    .then(response => {
+                        this.form = response.data.data
+                        this.form.brand_id = this.form.brand_id
+                            ? Number(this.form.brand_id)
+                            : null
+                        this.enabled_percentage_of_profit = parseFloat(this.form.percentage_of_profit) > 0;
+                        if (this.globalIgvHandling) {
+                            this.form.has_igv = true
+                            this.form.purchase_has_igv = true
+                        }
+                        console.error(this.form.is_for_production)
+                        this.changeAffectationIgvType()
+                        this.changePurchaseAffectationIgvType()
+                    })
+            }
+        },
+        calculatePercentageOfProfitBySale() {
+            let difference = parseFloat(this.form.sale_unit_price) - parseFloat(this.form.purchase_unit_price);
+
+            if (parseFloat(this.form.purchase_unit_price) === 0) {
+                this.form.percentage_of_profit = 0;
+            } else {
+                if (this.enabled_percentage_of_profit) this.form.percentage_of_profit = difference / parseFloat(this.form.purchase_unit_price) * 100;
+            }
+        },
+        calculatePercentageOfProfitByPurchase() {
+            if (this.form.percentage_of_profit === '') {
+                this.form.percentage_of_profit = 0;
+            }
+
+            if (this.enabled_percentage_of_profit) this.form.sale_unit_price = (this.form.purchase_unit_price * (100 + parseFloat(this.form.percentage_of_profit))) / 100
+        },
+        calculatePercentageOfProfitByPercentage() {
+            if (this.form.percentage_of_profit === '') {
+                this.form.percentage_of_profit = 0;
+            }
+
+            if (this.enabled_percentage_of_profit) this.form.sale_unit_price = (this.form.purchase_unit_price * (100 + parseFloat(this.form.percentage_of_profit))) / 100
+        },
+        isDecimalUnit(unitTypeId) {
+            // Solo la unidad NIU (Unidad SUNAT) exige cantidades enteras; el resto (incluidas las unidades creadas manualmente) admite decimales
+            return unitTypeId !== 'NIU';
+        },
+        validateItemUnitTypes() {
+
+            let error_by_item = 0
+
+            if (this.form.item_unit_types.length > 0) {
+
+                this.form.item_unit_types.forEach(item => {
+
+                    const factor = parseFloat(item.quantity_unit)
+
+                    if (isNaN(factor) || factor < 0.0001) {
+                        error_by_item++
+                    } else if (!this.isDecimalUnit(item.unit_type_id) && !Number.isInteger(factor)) {
+                        error_by_item++
+                    }
+
+                })
+
+            }
+
+            return error_by_item
+
+        },
+        async submit() {
+
+            const payload = {
+                ...this.form,
+                name: this.stripHtml(this.form.name)
+            }
+
+            // El preview recién subido llega como data URI (base64) y el backend
+            // no lo usa: guarda la imagen desde temp_path. Enviarlo duplicaría el
+            // peso del archivo dentro del request y hace fallar el guardado.
+            if (typeof payload.image_url === 'string' && payload.image_url.startsWith('data:')) {
+                delete payload.image_url
+            }
+
+            const [main_image] = this.gallery
+            payload.temp_path = (main_image && main_image.source === 'new') ? main_image.temp_path : null
+            payload.image = main_image ? (main_image.source === 'new' ? main_image.filename : this.form.image) : null
+            if (!main_image) payload.image_url = null
+            payload.gallery = this.gallery.map(image => ({
+                type: image.source,
+                id: image.id || null,
+                filename: image.filename || null,
+                temp_path: image.temp_path || null,
+            }))
+
+            if (this.globalIgvHandling) {
+                payload.has_igv = true
+                payload.purchase_has_igv = true
+            }
+
+            const stock = parseInt(payload.stock);
+            if (isNaN(stock)) {
+                return this.$message.error('Stock Inicial debe ser un número entero.');
+            }
+
+            if (this.config.enable_list_product && this.form.item_unit_types.some(row => !row.description || String(row.description).trim() === '')) {
+                return this.$message.error('La descripción de la presentación es obligatoria.');
+            }
+
+            if (this.validateItemUnitTypes() > 0)
+                return this.$message.error('Factor inválido: mínimo 0.0001 y solo se permiten decimales en unidades distintas a NIU (Unidad).');
+
+            if (this.fromPharmacy === true) {
+                if (!payload.cod_digemid)
+                    return this.$message.error('Debe haber un codigo DIGEMID');
+
+                if (!payload.sanitary)
+                    return this.$message.error('Debe haber un Registro Sanitario');
+            }
+
+            if (payload.has_perception && !payload.percentage_perception)
+                return this.$message.error('Ingrese un porcentaje');
+
+            if (payload.lots_enabled && stock > 0) {
+                if (!payload.lot_code)
+                    return this.$message.error('Código de lote es requerido');
+
+                if (!payload.date_of_due)
+                    return this.$message.error('Fecha de vencimiento es requerido si lotes esta habilitado.');
+            }
+
+            if (!this.recordId && payload.series_enabled) {
+                if (payload.lots.length > payload.stock)
+                    return this.$message.error('La cantidad de series registradas es superior al stock');
+
+                if (payload.lots.length != payload.stock)
+                    return this.$message.error('La cantidad de series registradas son diferentes al stock');
+            }
+
+            if (payload.has_isc && payload.percentage_isc <= 0)
+                return this.$message.error('El porcentaje isc debe ser mayor a 0');
+
+            if (payload.purchase_has_isc && payload.purchase_percentage_isc <= 0)
+                return this.$message.error('El porcentaje isc debe ser mayor a 0 (Compras)');
+
+            this.loading_submit = true;
+
+            try {
+                const response = await this.$http.post(`/${this.resource}`, payload);
+
+                if (response.data.success) {
+
+                    if (!this.recordId && response.data.id && this.inventory_configuration?.generate_internal_id) {
+                        const nextNum = parseInt(response.data.id) + 1;
+                        this.next_internal_id = String(nextNum).padStart(5, '0');
+                    }
+
+                    if (this.variation_rows.length > 0 && !this.form.parent_item_id) {
+                        this.form.id = response.data.id;
+                        const variationsOk = await this.submitVariationsBulk(response.data.id);
+                        if (!variationsOk) {
+                            await this.refreshGallery(response.data.id).catch(error => console.error(error));
+                            this.$message.warning('El producto se guardó, pero las variaciones tienen errores. Corrígelas y vuelve a guardar.');
+                            return;
+                        }
+                    }
+
+                    this.$message.success(response.data.message);
+                    this.$eventHub.$emit(this.external ? 'reloadDataItems' : 'reloadData', response.data.id);
+                    this.close();
+
+                } else {
+                    const msg = response.data.message || '';
+                    if (msg.toLowerCase().includes('código interno') || msg.toLowerCase().includes('internal id')) {
+                        this.errors = { internal_id: [msg] };
+                    } else {
+                        this.$message.error(msg || 'Error al guardar el producto');
+                    }
+                }
+
+            } catch (error) {
+                if (error.response?.status === 422) {
+                    this.errors = error.response.data.errors || error.response.data;
+                } else if (error.response?.data?.message) {
+                    const msg = error.response.data.message.toLowerCase();
+                    if (msg.includes('código interno') || msg.includes('internal id')) {
+                        this.errors = { internal_id: [error.response.data.message] };
+                    } else {
+                        this.$message.error(error.response.data.message);
+                    }
+                } else {
+                    console.log(error);
+                    this.$message.error('Server Error');
+                }
+            } finally {
+                this.loading_submit = false;
+            }
+        },
+        close() {
+            this.$emit('update:showDialog', false)
+            this.resetForm()
+        },
+        changeHasIsc() {
+            this.form.system_isc_type_id = null
+            this.form.percentage_isc = 0
+            this.form.suggested_price = 0
+        },
+        changeSystemIscType() {
+            if (this.form.system_isc_type_id !== '03') {
+                this.form.suggested_price = 0
+            }
+        },
+        saveCategory() {
+            this.form_category.add = false
+
+            this.$http.post(`/categories`, this.form_category)
+                .then(response => {
+                    if (response.data.success) {
+                        this.$message.success(response.data.message)
+                        this.categories.push(response.data.data)
+                        this.filteredCategories = this.categories
+                        this.form_category.name = null
+                    } else {
+                        this.$message.error('No se guardaron los cambios')
+                    }
+                })
+                .catch(error => {
+
+                })
+        },
+        filterCategories(query) {
+            this.categorySearchQuery = query
+
+            if (query) {
+                this.filteredCategories = this.categories.filter(category => {
+                    return category.name.toLowerCase().includes(query.toLowerCase())
+                })
+            } else {
+                this.filteredCategories = this.categories
+            }
+        },
+        onCategoryDropdownChange(visible) {
+            if (!visible) {
+                // Reset cuando se cierra
+                this.categorySearchQuery = ''
+            } else {
+                // Inicializar cuando se abre
+                this.filteredCategories = this.categories
+            }
+        },
+        createCategoryFromSearch() {
+            const categoryName = this.categorySearchQuery
+
+            if (!categoryName || categoryName.trim() === '') {
+                return
+            }
+
+            this.form_category.name = categoryName
+
+            this.$http.post(`/categories`, this.form_category)
+                .then(response => {
+                    if (response.data.success) {
+                        this.$message.success(response.data.message)
+                        this.categories.push(response.data.data)
+                        this.filteredCategories = this.categories
+
+                        this.$nextTick(() => {
+                            this.form.category_id = response.data.data.id
+                        })
+
+                        this.form_category.name = null
+                        this.categorySearchQuery = ''
+                    } else {
+                        this.$message.error('No se guardaron los cambios')
+                    }
+                })
+                .catch(error => {
+                    this.$message.error('Error al crear la categoría')
+                })
+        },
+        saveBrand() {
+            const name = (this.form_brand.name || '').trim()
+            if (!name) {
+                return this.$message.warning('Ingrese el nombre de la marca')
+            }
+
+            this.form_brand.name = name
+            this.$http.post(`/brands`, this.form_brand)
+                .then(response => {
+                    if (response.data.success) {
+                        this.$message.success(response.data.message)
+                        if (!this.brands.some(brand => brand.id === response.data.data.id)) {
+                            this.brands.push(response.data.data)
+                        }
+                        this.filteredBrands = [...this.brands]
+                        this.form.brand_id = Number(response.data.data.id)
+                        this.form_brand.name = null
+                        this.form_brand.add = false
+
+                    } else {
+                        this.$message.error(response.data.message || 'No se guardaron los cambios')
+                    }
+                })
+                .catch(() => {
+                    this.$message.error('Error al crear la marca')
+                })
+
+
+        },
+        cancelBrand() {
+            this.form_brand.add = false
+            this.form_brand.name = null
+        },
+        filterBrands(query) {
+            this.brandSearchQuery = query
+
+            if (query) {
+                this.filteredBrands = this.brands.filter(brand => {
+                    return brand.name.toLowerCase().includes(query.toLowerCase())
+                })
+            } else {
+                this.filteredBrands = this.brands
+            }
+        },
+        onBrandDropdownChange(visible) {
+            if (!visible) {
+                // Reset cuando se cierra
+                this.brandSearchQuery = ''
+            } else {
+                // Inicializar cuando se abre
+                this.filteredBrands = this.brands
+            }
+        },
+        createBrandFromSearch() {
+            const brandName = this.brandSearchQuery
+
+            if (!brandName || brandName.trim() === '') {
+                return
+            }
+
+            this.form_brand.name = brandName
+
+            this.$http.post(`/brands`, this.form_brand)
+                .then(response => {
+                    if (response.data.success) {
+                        this.$message.success(response.data.message)
+                        this.brands.push(response.data.data)
+                        this.filteredBrands = this.brands
+
+                        this.$nextTick(() => {
+                            this.form.brand_id = response.data.data.id
+                        })
+
+                        this.form_brand.name = null
+                        this.brandSearchQuery = ''
+                    } else {
+                        this.$message.error('No se guardaron los cambios')
+                    }
+                })
+                .catch(error => {
+                    this.$message.error('Error al crear la marca')
+                })
+        },
+        changeAttributeType(index) {
+            let attribute_type_id = this.form.attributes[index].attribute_type_id
+            let attribute_type = _.find(this.attribute_types, {id: attribute_type_id})
+            this.form.attributes[index].description = attribute_type.description
+        },
+        clickRemoveAttribute(index) {
+            this.form.attributes.splice(index, 1)
+        },
+        async searchRemoteItems(input) {
+            if (input.length > 2) {
+                this.loading_search = true
+                const params = {
+                    'input': input,
+                    'search_by_barcode': this.search_item_by_barcode ? 1 : 0,
+                    'production':1
+                }
+                await this.$http.get(`/${this.resource}/search-items/`, {params})
+                    .then(response => {
+                        this.items = response.data.items
+                        this.loading_search = false
+                        // this.enabledSearchItemsBarcode()
+                        // this.enabledSearchItemBySeries()
+                        if (this.items.length == 0) {
+                            // this.filterItems()
+                        }
+                    })
+            } else {
+                // await this.filterItems()
+            }
+
+        },
+        getItems() {
+            this.$http.get(`/${this.resource}/item/tables`).then(response => {
+                this.items = response.data.items
+            })
+        },
+        changeItem() {
+            // Antes se llamaba a getItems(), que carga TODOS los productos en el
+            // buscador (sin límite) y dejaba el formulario lento en cada clic.
+            // El insumo elegido ya está en los resultados de la búsqueda.
+            this.item_suplly = _.find(this.items, {'id': this.item_suplly});
+            /*
+            this.form.unit_price = this.item_suplly.sale_unit_price;
+
+            this.lots = this.item_suplly.lots
+
+            this.form.has_igv = this.item_suplly.has_igv;
+
+            this.form.affectation_igv_type_id = this.item_suplly.sale_affectation_igv_type_id;
+            this.form.quantity = 1;
+            this.item_unit_types = this.item_suplly.item_unit_types;
+
+            (this.item_unit_types.length > 0) ? this.has_list_prices = true : this.has_list_prices = false;
+            */
+
+        },
+        focusSelectItem() {
+            this.$refs.selectSearchNormal.$el.getElementsByTagName('input')[0].focus()
+        },
+
+        ItemSlotTooltipView(item) {
+            return ItemSlotTooltip(item);
+        },
+        ItemOptionDescriptionView(item) {
+            return ItemOptionDescription(item)
+        },
+        clickAddSupply(){
+            // item_supplies
+            if(this.form.supplies === undefined) this.form.supplies = [];
+            let item = this.item_suplly;
+            if(item === null) return false;
+            if(item === undefined) return false;
+            if(item.id=== undefined) return false;
+            this.items = [];
+            this.item_suplly = {}
+
+            item.item_id = this.form.id
+            //item.individual_item_id = item.id
+            item.individual_item_id = item.id
+            item.individual_item = {
+                'description':item.description
+            }
+            //item.individual_item = item
+            // item.quantity = 0
+            //if(isNaN(item.quantity)) item.quantity = 0 ;
+            this.form.supplies.push(item)
+            this.changeItem()
+
+
+        },
+        loadCurrentEstablishment() {
+            this.$http.get('/establishments/getEstablishmentActive')
+                .then(response => {
+                    if (response.data.success) {
+                        const establishment = response.data.establishment;
+
+                        if (establishment && this.warehouses.length > 0) {
+                            const relatedWarehouse = this.warehouses.find(w =>
+                                w.description.includes(establishment.description));
+
+                            if (relatedWarehouse) {
+                                this.form.warehouse_id = relatedWarehouse.id;
+                            } else {
+
+                                this.form.warehouse_id = this.warehouses[0].id;
+                            }
+                        }
+                    }
+                })
+                .catch(error => {
+                    console.error('Error al obtener la sucursal activa:', error);
+                });
+        },
+        showTab(tabKey) {
+            const allowed = TABS_BY_VARIANT[this.resolvedVariant] || TABS_BY_VARIANT.standard
+            return allowed.includes(tabKey)
+        },
+        isPinned(fieldKey) {
+            return this.pinnedKeysSet.has(fieldKey)
+        },
+        loadLayout() {
+            this.$http.get(`/item-form-layout/${this.resolvedVariant}`)
+                .then(response => {
+                    const data = response.data && response.data.data ? response.data.data : null
+                    const available = getAvailableFields(this.resolvedVariant, {
+                        globalIgvHandling: this.globalIgvHandling,
+                    }).map(f => f.key)
+                    const remote = data && Array.isArray(data.pinned_fields) ? data.pinned_fields : []
+                    const filtered = remote.filter(p =>
+                        (typeof p.field_key === 'string' && p.field_key.indexOf('__spacer__') === 0)
+                        || available.includes(p.field_key))
+                    this.pinned_fields = filtered.length > 0
+                        ? filtered
+                        : getDefaultLayout(this.resolvedVariant)
+                })
+                .catch(() => {
+                    this.pinned_fields = getDefaultLayout(this.resolvedVariant)
+                })
+        },
+        pinFromForm(fieldKey) {
+            if (fieldKey === 'has_igv' && this.globalIgvHandling) {
+                this.$message.warning('No puede fijar "Incluye IGV" mientras el manejo de IGV global está activado en Configuraciones.');
+                return;
+            }
+            if (this.$refs.pinnedBar && typeof this.$refs.pinnedBar.pinField === 'function') {
+                this.$refs.pinnedBar.pinField(fieldKey);
+            }
+        },
+        enterLayoutEditFromHeader() {
+            if (this.$refs.pinnedBar && typeof this.$refs.pinnedBar.enterEditMode === 'function') {
+                this.$refs.pinnedBar.enterEditMode();
+            }
+        },
+        resetLayoutFromHeader() {
+            if (this.$refs.pinnedBar && typeof this.$refs.pinnedBar.resetLayout === 'function') {
+                this.$refs.pinnedBar.resetLayout();
+            }
+        },
+        confirmLayoutFromHeader() {
+            if (this.$refs.pinnedBar && typeof this.$refs.pinnedBar.confirmEdit === 'function') {
+                this.$refs.pinnedBar.confirmEdit();
+            }
+        },
+        cancelLayoutEditFromHeader() {
+            if (this.$refs.pinnedBar && typeof this.$refs.pinnedBar.cancelEdit === 'function') {
+                this.$refs.pinnedBar.cancelEdit();
+            }
+        },
+        onSaveLayout(pinned, done) {
+            this.layout_saving = true
+            this.$http.put(`/item-form-layout/${this.resolvedVariant}`, { pinned_fields: pinned })
+                .then(response => {
+                    if (response.data && response.data.success) {
+                        this.pinned_fields = response.data.data.pinned_fields
+                        this.$message.success(response.data.message || 'Configuración guardada')
+                        if (typeof done === 'function') done()
+                    } else {
+                        this.$message.error('No se pudo guardar la configuración')
+                    }
+                })
+                .catch(error => {
+                    const msg = error.response && error.response.data && error.response.data.message
+                        ? error.response.data.message
+                        : 'No se pudo guardar la configuración'
+                    this.$message.error(msg)
+                })
+                .then(() => {
+                    this.layout_saving = false
+                })
+        },
+    }
+}
+</script>
+
+<style scoped>
+.advanced-section + .advanced-section {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid rgba(0, 0, 0, 0.07);
+}
+.advanced-section__title {
+    margin-bottom: 12px;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: #6c757d;
+}
+.advanced-toggle {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-height: 46px;
+}
+.advanced-toggle + .advanced-toggle {
+    border-top: 1px dashed rgba(0, 0, 0, 0.06);
+}
+.advanced-toggle__check {
+    flex: 0 0 220px;
+}
+.advanced-toggle__fields {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+}
+.advanced-toggle__fields >>> .el-input,
+.advanced-toggle__fields >>> .el-select,
+.advanced-toggle__fields >>> .el-date-editor {
+    width: 190px;
+}
+@media (max-width: 767px) {
+    .advanced-toggle__check {
+        flex: 0 0 100%;
+    }
+}
+
+/* Estilos para tabla de precios expandible */
+.prices-row td {
+    border-top: none !important;
+}
+
+.prices-row .bg-light {
+    background-color: #f8f9fa !important;
+}
+.btn-chevron i{
+    transition: transform 0.3s ease;
+}
+.btn-chevron.rotated i{
+    transform: rotate(90deg);
+}
+.item-img-fill {
+    display: block;
+    width: 100%;
+}
+.item-img-fill ::v-deep .el-upload {
+    width: 100%;
+    height: 220px;
+    border: 1px dashed #d9d9d9;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    cursor: pointer;
+}
+.item-img-fill ::v-deep .el-upload:hover {
+    border-color: #409EFF;
+}
+.item-img-fill ::v-deep .avatar {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+.item-img-fill ::v-deep .avatar-uploader-icon {
+    font-size: 48px;
+    color: #8c939d;
+}
+.pv-color-dot {
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    margin-right: 6px;
+    vertical-align: middle;
+}
+.pv-variable-card {
+    border: 1px dashed #dcdfe6;
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-bottom: 12px;
+}
+.pv-variable-card ::v-deep .el-select__tags {
+    max-width: 100% !important;
+}
+.pv-variable-card ::v-deep .el-select__tags .el-tag {
+    margin: 2px 0 2px 6px;
+}
+.pv-color-select ::v-deep .el-select__tags .el-tag::before {
+    content: '';
+    display: none;
+    width: 10px;
+    height: 10px;
+    margin-right: 5px;
+    border-radius: 50%;
+    border: 1px solid rgba(0, 0, 0, 0.15);
+    vertical-align: middle;
+}
+.pv-color-select ::v-deep .el-tag:nth-child(1)::before { display: inline-block; background: var(--pv-dot-1); }
+.pv-color-select ::v-deep .el-tag:nth-child(2)::before { display: inline-block; background: var(--pv-dot-2); }
+.pv-color-select ::v-deep .el-tag:nth-child(3)::before { display: inline-block; background: var(--pv-dot-3); }
+.pv-color-select ::v-deep .el-tag:nth-child(4)::before { display: inline-block; background: var(--pv-dot-4); }
+.pv-color-select ::v-deep .el-tag:nth-child(5)::before { display: inline-block; background: var(--pv-dot-5); }
+.pv-color-select ::v-deep .el-tag:nth-child(6)::before { display: inline-block; background: var(--pv-dot-6); }
+.pv-color-select ::v-deep .el-tag:nth-child(7)::before { display: inline-block; background: var(--pv-dot-7); }
+.pv-color-select ::v-deep .el-tag:nth-child(8)::before { display: inline-block; background: var(--pv-dot-8); }
+.pv-color-select ::v-deep .el-tag:nth-child(9)::before { display: inline-block; background: var(--pv-dot-9); }
+.pv-color-select ::v-deep .el-tag:nth-child(10)::before { display: inline-block; background: var(--pv-dot-10); }
+.pv-color-select ::v-deep .el-tag:nth-child(11)::before { display: inline-block; background: var(--pv-dot-11); }
+.pv-color-select ::v-deep .el-tag:nth-child(12)::before { display: inline-block; background: var(--pv-dot-12); }
+.pv-color-select ::v-deep .el-tag:nth-child(13)::before { display: inline-block; background: var(--pv-dot-13); }
+.pv-color-select ::v-deep .el-tag:nth-child(14)::before { display: inline-block; background: var(--pv-dot-14); }
+.pv-color-select ::v-deep .el-tag:nth-child(15)::before { display: inline-block; background: var(--pv-dot-15); }
+.pv-color-select ::v-deep .el-tag:nth-child(16)::before { display: inline-block; background: var(--pv-dot-16); }
+.pv-color-select ::v-deep .el-tag:nth-child(17)::before { display: inline-block; background: var(--pv-dot-17); }
+.pv-color-select ::v-deep .el-tag:nth-child(18)::before { display: inline-block; background: var(--pv-dot-18); }
+.pv-color-select ::v-deep .el-tag:nth-child(19)::before { display: inline-block; background: var(--pv-dot-19); }
+.pv-color-select ::v-deep .el-tag:nth-child(20)::before { display: inline-block; background: var(--pv-dot-20); }
+.attr-gen-bar {
+    background: color-mix(in srgb, var(--primary) 10%, #fefefe00);
+    border-radius: 8px;
+    padding: 10px 14px;
+    margin-bottom: 14px;
+}
+</style>

@@ -1,0 +1,274 @@
+<template>
+    <el-dialog :title="titleDialog" :visible="dialogVisible" @open="create" @close="close" top="8vh" width="640px">
+        <div class="form-body dispatch-add-item">
+            <div class="row align-items-end">
+                <div class="col-md-7">
+                    <div class="form-group mb-0" :class="{'has-danger': errors.items}">
+                        <label class="control-label">
+                            Producto
+                            <a href="#" @click.prevent="showDialogNewItem = true">[+ Nuevo]</a>
+                        </label>
+                        <el-select
+                            class="w-100"
+                            v-model="form.item"
+                            filterable
+                            @change="onChangeItem"
+                            remote
+                            :remote-method="searchRemoteItems"
+                            :loading="loading_search"
+                        >
+                            <el-option v-for="option in items" :key="option.id" :value="option.id" :label="option.full_description"></el-option>
+                        </el-select>
+                        <small class="form-control-feedback" v-if="errors.items" v-text="errors.items[0]"></small>
+                    </div>
+                </div>
+                <div class="col-md-5">
+                    <div class="form-group mb-0" :class="{'has-danger': errors.quantity}">
+                        <label class="control-label">Cantidad</label>
+                        <el-input-number
+                            class="w-100 dispatch-qty-input"
+                            v-model="form.quantity"
+                            :precision="4"
+                            :step="1"
+                            :min="0.01"
+                            :max="99999999"
+                            controls-position="right"
+                        ></el-input-number>
+                        <small class="form-control-feedback" v-if="errors.quantity" v-text="errors.quantity[0]"></small>
+                    </div>
+                </div>
+            </div>
+            <div class="row mt-3" v-if="item && item.lots_enabled && item.lots_group.length > 0">
+                <div class="col-12">
+                    <a href="#" class="text-center font-weight-bold text-info" @click.prevent="clickLotGroup">[&#10004; Seleccionar lote]</a>
+                </div>
+            </div>
+            <div class="row mt-3 align-items-end" v-if="showWeightInput">
+                <div class="col-md-5">
+                    <div class="form-group mb-0" :class="{'has-danger': errors.weight}">
+                        <label class="control-label">Peso</label>
+                        <el-input-number
+                            class="w-100 dispatch-qty-input"
+                            v-model="form.weight"
+                            :precision="4"
+                            :step="1"
+                            :min="0.01"
+                            :max="99999999"
+                            controls-position="right"
+                        ></el-input-number>
+                        <small class="form-control-feedback" v-if="errors.weight" v-text="errors.weight[0]"></small>
+                    </div>
+                </div>
+            </div>
+            <div
+                v-if="canEditNameProduct && item"
+                class="row mt-3"
+            >
+                <div class="col-12">
+                    <div class="form-group mb-0">
+                        <label class="control-label">
+                            {{ replaceNameLabel }}
+                            <el-tooltip
+                                class="item"
+                                effect="dark"
+                                content="Nombre que se mostrará en la guía (PDF). Útil para un producto genérico y describir materiales distintos sin crearlos en el catálogo."
+                                placement="top-start"
+                            >
+                                <i class="fa fa-info-circle"></i>
+                            </el-tooltip>
+                        </label>
+                        <el-input
+                            v-model="form.name_product_pdf"
+                            type="textarea"
+                            :rows="3"
+                            placeholder="Ej. Materiales varios: fierro, cemento, etc."
+                        ></el-input>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <span slot="footer" class="dialog-footer">
+            <el-button class="second-buton" @click.prevent="close">Cerrar</el-button>
+            <el-button type="primary" @click="clickAddItem">Agregar</el-button>
+        </span>
+
+        <item-form :showDialog.sync="showDialogNewItem" :external="true"></item-form>
+
+        <lots-group
+            v-if="item"
+            :quantity="form.quantity"
+            :showDialog.sync="showDialogLots"
+            :lotsGroup="item.lots_group"
+            @addRowLotGroup="addRowLotGroup">
+        </lots-group>
+    </el-dialog>
+</template>
+
+<style scoped>
+.dispatch-add-item .control-label {
+    display: block;
+    min-height: 1.5rem;
+    margin-bottom: 0.35rem;
+}
+.dispatch-add-item .dispatch-qty-input {
+    width: 100%;
+}
+.dispatch-add-item .dispatch-qty-input ::v-deep .el-input-number,
+.dispatch-add-item .dispatch-qty-input.el-input-number {
+    width: 100%;
+}
+.dispatch-add-item .dispatch-qty-input ::v-deep .el-input__inner {
+    text-align: left;
+}
+</style>
+
+<script>
+    import itemForm from '../items/form.vue';
+    import LotsGroup from '../documents/partials/lots_group.vue';
+    import { mapState } from 'vuex/dist/vuex.mjs';
+
+    export default {
+        components: {itemForm, LotsGroup},
+        props: ['dialogVisible', 'showWeightInput'],
+        data() {
+            return {
+                titleDialog: 'Agregar Producto',
+                showDialogNewItem: false,
+                all_items: [],
+                resource: 'dispatches',
+                errors: {},
+                items: [],
+                form: {},
+                showDialogLots: false,
+                item: null,
+                loading_search:false,
+            }
+        },
+        computed: {
+            ...mapState(['config']),
+            canEditNameProduct() {
+                return !!(this.config && this.config.edit_name_product);
+            },
+            canAddDescriptionToDocumentItem() {
+                return !!(this.config && this.config.add_description_to_document_item);
+            },
+            replaceNameLabel() {
+                return this.canAddDescriptionToDocumentItem
+                    ? 'Reemplazar nombre'
+                    : 'Nombre producto en PDF';
+            },
+        },
+        methods: {
+            clickLotGroup() {
+                this.showDialogLots = true
+            },
+            onChangeItem() {
+                this.form.IdLoteSelected = null;
+                this.item = this.items.find(it => it.id == this.form.item);
+                this.prefillNameProductPdf();
+            },
+            prefillNameProductPdf() {
+                if (!this.canEditNameProduct || !this.item) {
+                    this.$set(this.form, 'name_product_pdf', '');
+                    return;
+                }
+
+                if (this.canAddDescriptionToDocumentItem) {
+                    const name = this.item.description || '';
+                    const extra = this.item.name || '';
+                    this.$set(this.form, 'name_product_pdf', [name, extra].filter(Boolean).join('\n'));
+                    return;
+                }
+
+                if (this.config.item_name_pdf_description && this.item.name_product_pdf) {
+                    this.$set(this.form, 'name_product_pdf', this.item.name_product_pdf);
+                    return;
+                }
+
+                this.$set(this.form, 'name_product_pdf', '');
+            },
+            addRowLotGroup(id) {
+                this.form.IdLoteSelected =  id;
+            },
+            create() {
+                this.$http.post(`/${this.resource}/tables`).then(response => {
+                    this.items = response.data.items;
+                    this.all_items = this.items
+                });
+
+                this.form = {
+                    name_product_pdf: '',
+                };
+                this.item = null;
+            },
+            close() {
+                this.$emit('update:dialogVisible', false);
+            },
+            clickAddItem() {
+                this.errors = {};
+
+                if(this.item.lots_enabled){
+                    if(! this.form.IdLoteSelected)
+                        return this.$message.error('Debe seleccionar un lote.');
+                }
+
+                if ((this.form.item != null) && (this.form.quantity != null)) {
+                    this.form.quantity = Math.abs(this.form.quantity)
+                    if(isNaN(this.form.quantity))this.form.quantity = 0;
+                    const item = this.items.find((item) => item.id == this.form.item)
+                    item.weight = this.form.weight;
+                    item.IdLoteSelected = this.form.IdLoteSelected;
+                    item.unit_price = item.sale_unit_price;
+                    item.total_value = item.sale_unit_price*this.form.quantity;
+                    item.total = item.sale_unit_price * this.form.quantity;
+                    this.$emit('addItem', {
+                        item,
+                        quantity: this.form.quantity,
+                        name_product_pdf: this.formatNameProductPdf(this.form.name_product_pdf),
+                    });
+
+                    this.form = {
+                        name_product_pdf: '',
+                    };
+                    this.item = null;
+                    return;
+                }
+
+                if (this.form.item == null) this.$set(this.errors, 'items', ['Seleccione el producto']);
+
+                if (this.form.quantity == null) this.$set(this.errors, 'quantity', ['Digite la cantidad']);
+
+                this.form.IdLoteSelected = null;
+            },
+            formatNameProductPdf(value) {
+                if (!value || !String(value).trim()) return '';
+                // Texto plano: el PDF lo imprime igual y no aparecen etiquetas <p>
+                return String(value).trim();
+            },
+            filterItems() {
+                this.items = this.all_items
+            },
+            async searchRemoteItems(input) {
+                if (input.length > 2) {
+                    this.loading_search = true
+                    const params = {
+                        'input': input,
+                        'search_by_barcode': this.search_item_by_barcode ? 1 : 0
+                    }
+                    await this.$http.get(`/documents/search-items`, { params })
+                            .then(response => {
+                                this.items = response.data.items
+                                this.loading_search = false
+                                // this.enabledSearchItemsBarcode()
+                                if(this.items.length == 0){
+                                    this.filterItems()
+                                }
+                            })
+                } else {
+                    await this.filterItems()
+                }
+
+            },
+        }
+    }
+</script>

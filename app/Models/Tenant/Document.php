@@ -1,0 +1,2287 @@
+<?php
+
+namespace App\Models\Tenant;
+
+use App\CoreFacturalo\Helpers\QrCode\QrCodeGenerate;
+use App\Http\Controllers\Tenant\DownloadController;
+use App\Models\Tenant\Catalogs\CurrencyType;
+use App\Models\Tenant\Catalogs\DocumentType;
+use App\Models\Tenant\Catalogs\District;
+use App\Traits\ApiResourceFindTrait;
+use App\Traits\SellerIdTrait;
+use Carbon\Carbon;
+use Eloquent;
+use ErrorException;
+use Exception;
+use Hyn\Tenancy\Traits\UsesTenantConnection;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Cache;
+use App\Helpers\CacheHelper;
+use Modules\BusinessTurn\Models\DocumentHotel;
+use Modules\BusinessTurn\Models\DocumentTransport;
+use Modules\Item\Models\WebPlatform;
+use Modules\Order\Models\OrderNote;
+use Modules\Sale\Models\TechnicalService;
+use phpDocumentor\Reflection\Utils;
+use Modules\Pos\Models\Tip;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Modules\Sale\Models\Agent;
+
+
+/**
+ * App\Models\Tenant\Document
+ *
+ * @property EloquentCollection|Note[] $affected_documents
+ * @property int|null $affected_documents_count
+ * @property EloquentCollection|DocumentFee[] $fee
+ * @property string|null $grade
+ * @property string|null $section
+ * @property int|null $fee_count
+ * @property mixed $additional_information
+ * @property mixed $charges
+ * @property mixed $company
+ * @property mixed $customer
+ * @property mixed $data_json
+ * @property mixed $detraction
+ * @property mixed $discounts
+ * @property mixed $download_external_cdr
+ * @property mixed $download_external_pdf
+ * @property mixed $download_external_xml
+ * @property mixed $establishment
+ * @property mixed $guides
+ * @property mixed $is_editable
+ * @property mixed $legends
+ * @property mixed $number_full
+ * @property mixed $number_to_letter
+ * @property mixed $perception
+ * @property mixed $prepayments
+ * @property string|null $payment_condition_id
+ * @property string|null $payment_method_type_id
+ * @property string|null $purchase_order
+ * @property string|null $plate_number
+ * @property int|null $quotation_id
+ * @property int|null $sale_note_id
+ * @property int|null $user_rel_suscription_plan_id
+ * @property int|null $technical_service_id
+ * @property int|null $order_note_id
+ * @property int|null $dispatch_id
+ * @property int|null $seller_id
+ * @property float $exchange_rate_sale
+ * @property Carbon|null $automatic_date_of_issue
+ * @property string|null $type_period
+ * @property int|null $quantity_period
+ * @property bool $enabled_concurrency
+ * @property bool $apply_concurrency
+ * @property mixed $related
+ * @property mixed $response_regularize_shipping
+ * @property mixed $soap_shipping_response
+ * @property DocumentHotel|null $hotel
+ * @property EloquentCollection|InventoryKardex[] $inventory_kardex
+ * @property int|null $inventory_kardex_count
+ * @property Invoice|null $invoice
+ * @property EloquentCollection|Kardex[] $kardex
+ * @property int|null $kardex_count
+ * @property Note|null $note
+ * @property EloquentCollection|DocumentPayment[] $payments
+ * @property int|null $payments_count
+ * @property Person $person
+ * @property EloquentCollection|Dispatch[] $reference_guides
+ * @property int|null $reference_guides_count
+ * @property SummaryDocument|null $summary_document
+ * @property DocumentTransport|null $transport
+ * @property CurrencyType $currency_type
+ * @property DocumentType $document_type
+ * @property Group $group
+ * @property OrderNote $order_note
+ * @property Quotation $quotation
+ * @property SaleNote $sale_note
+ * @property User $seller
+ * @property SoapType $soap_type
+ * @property StateType $state_type
+ * @property User $user
+ * @property EloquentCollection|Cash[] $cashes
+ * @property Collection|Dispatch[] $dispatches
+ * @property Collection|DocumentFee[] $document_fees
+ * @property Collection|DocumentHotel[] $document_hotels
+ * @property EloquentCollection|DocumentItem[] $items
+ * @property int|null $items_count
+ * @property Dispatch|null $dispatch
+ * @property EloquentCollection|GuideFile[] $guide_files
+ * @property int|null $guide_files_count
+ * @property PaymentCondition|null $payment_condition
+ * @property PaymentMethodType $payment_method_type
+ * @property TechnicalService|null $technical_service
+ * @property Collection|DocumentPayment[] $document_payments
+ * @property Collection|DocumentTransport[] $document_transports
+ * @property Collection|Invoice[] $invoices
+ * @property Collection|Kardex[] $kardexes
+ * @property Collection|Note[] $notes_where_affected_document
+ * @property Collection|Note[] $notes
+ * @property Collection|Summary[] $summaries
+ * @property Collection|Voided[] $voideds
+ * @method static EloquentBuilder|Document newModelQuery()
+ * @method static EloquentBuilder|Document newQuery()
+ * @method static EloquentBuilder|Document query()
+ * @method static EloquentBuilder|Document whereAffectationTypePrepayment($type)
+ * @method static EloquentBuilder|Document whereHasPrepayment()
+ * @method static EloquentBuilder|Document whereNotSent()
+ * @method static EloquentBuilder|Document whereRegularizeShipping()
+ * @method static EloquentBuilder|Document whereStateTypeAccepted()
+ * @method static EloquentBuilder|Document whereTypeUser()
+ * @method static EloquentBuilder|Document WhereEstablishmentId()
+ * @mixin Eloquent
+ * @method static EloquentBuilder|Document whereValuedKardexFormatSunat($params)
+ * @property mixed $retention
+ */
+class Document extends ModelTenant
+{
+    use UsesTenantConnection;
+    use SellerIdTrait;
+    use ApiResourceFindTrait;
+
+    public const DOCUMENT_TYPE_TICKET = '03';
+
+    public const GROUP_INVOICE = '01';
+
+    public const GROUP_TICKET = '02';
+
+
+    protected $with = [
+        'user',
+        'soap_type',
+        'state_type',
+        'document_type',
+        'currency_type',
+        'group',
+        'items',
+        'invoice',
+        'note',
+        'payments',
+        'fee'
+    ];
+    protected $fillable = [
+        'user_id',
+        'external_id',
+        'establishment_id',
+        'establishment',
+        'soap_type_id',
+        'state_type_id',
+        'ubl_version',
+        'group_id',
+        'document_type_id',
+        'series',
+        'number',
+        'date_of_issue',
+        'time_of_issue',
+        'customer_id',
+        'customer',
+        'currency_type_id',
+        'purchase_order',
+        'grade',
+        'section',
+        'quotation_id',
+        'exchange_rate_sale',
+        'total_prepayment',
+        'total_discount',
+        'total_charge',
+        'total_exportation',
+        'total_free',
+        'total_taxed',
+        'total_unaffected',
+        'total_exonerated',
+        'total_igv',
+        'total_base_isc',
+        'total_isc',
+        'total_base_other_taxes',
+        'total_other_taxes',
+        'total_taxes',
+        'total_value',
+        'total',
+        'charges',
+        'discounts',
+        'prepayments',
+        'guides',
+        'related',
+        'perception',
+        'detraction',
+        'legends',
+        'additional_information',
+        'additional_data',
+        'filename',
+        'hash',
+        'qr',
+        'has_xml',
+        'has_pdf',
+        'has_cdr',
+        'has_prepayment',
+        'affectation_type_prepayment',
+        'data_json',
+        'send_server',
+        'shipping_status',
+        'sunat_shipping_status',
+        'query_status',
+        'total_plastic_bag_taxes',
+        'sale_note_id',
+        'success_shipping_status',
+        'success_sunat_shipping_status',
+        'success_query_status',
+        'plate_number',
+        'total_canceled',
+        'order_note_id',
+        'soap_shipping_response',
+        'pending_amount_prepayment',
+        'payment_method_type_id',
+        'regularize_shipping',
+        'response_regularize_shipping',
+        'seller_id',
+        'reference_data',
+        'terms_condition',
+        'payment_condition_id',
+        'is_editable',
+        'dispatch_id',
+        'subtotal',
+        'total_igv_free',
+        'technical_service_id',
+        // 'pending_amount_detraction',
+        'total_pending_payment', //usado para detracciones - retenciones
+        'retention',
+        'user_rel_suscription_plan_id',
+        'automatic_date_of_issue',
+        'type_period',
+        'quantity_period',
+        'enabled_concurrency',
+        'apply_concurrency',
+
+        'send_to_pse',
+        'response_signature_pse',
+        'response_send_cdr_pse',
+
+        'sale_notes_relateds', //generar cpe desde multiples notas de venta
+        'unique_filename', //registra nombre de archivo unico (campo validador para evitar duplicidad)
+
+        'ticket_single_shipment',
+        'point_system',
+        'point_system_data',
+        'folio',
+        'agent_id',
+        'force_send_by_summary',
+        'dispatch_ticket_pdf',
+        'hotel_data_persons',
+        'source_module',
+        'hotel_rent_id',
+        'itinerant',
+        'consigned_id',
+        'consigned_address',
+        'consigned_ubigeo',
+        'custom_fields_data',
+    ];
+
+    protected $casts = [
+        'date_of_issue' => 'date',
+        'user_rel_suscription_plan_id' => 'int',
+        'quantity_period' => 'int',
+        'enabled_concurrency' => 'bool',
+        'apply_concurrency' => 'bool',
+        'send_to_pse' => 'bool',
+        'total' => 'float',
+        'ticket_single_shipment' => 'bool',
+        'point_system' => 'bool',
+        'force_send_by_summary' => 'bool',
+        'dispatch_ticket_pdf' => 'bool',
+        'custom_fields_data' => 'array',
+    ];
+
+    public static function boot()
+    {
+        parent::boot();
+        static::creating(function (self $model) {
+            self::adjustSellerIdField($model);
+        });
+    }
+
+    protected static function booted()
+    {
+        static::created(function ($document){
+            CacheHelper::flush(['document_list']);
+            CacheHelper::flush(['document_detail']);
+        });
+
+        static::updated(function ($document){
+            CacheHelper::flush(['document_list']);
+            CacheHelper::flush(['document_detail']);
+        });
+
+        static::deleted(function ($document){
+            CacheHelper::flush(['document_list']);
+            CacheHelper::flush(['document_detail']);
+        });
+
+        static::saved(function ($document){
+            CacheHelper::flush(['document_list']);
+            CacheHelper::flush(['document_detail']);
+        });
+    }
+
+    /**
+     * Factor para llevar un importe sin IGV a su valor con IGV según la afectación del ítem.
+     * Solo la operación onerosa gravada (10) lleva IGV; exonerado, inafecto, exportación
+     * y gratuitos se muestran tal cual.
+     *
+     * @param object $item
+     * @return float
+     */
+    public static function igvFactorByItem($item)
+    {
+        if ((string) data_get($item, 'affectation_igv_type_id') !== '10') {
+            return 1;
+        }
+
+        $percentage_igv = data_get($item, 'percentage_igv');
+
+        return 1 + ((is_numeric($percentage_igv) ? (float) $percentage_igv : 18) / 100);
+    }
+
+    /**
+     * Descuentos del comprobante con IGV, separados según afecten o no la base imponible.
+     *
+     * - total: todo el descuento (fila DESCUENTO TOTAL del PDF).
+     * - base:  solo lo que redujo la base (tipo 00). El subtotal ya viene neto de este
+     *          importe, así que es lo único que hay que sumarle para la SUMA DE IMPORTES.
+     *          Los que no afectan la base (01 / global 03) no tocan la línea ni el
+     *          subtotal: solo se restan del total.
+     *
+     * Con anticipo, total_discount guarda el anticipo deducido (se muestra aparte con
+     * total_prepayment), por eso no se usa como descuento.
+     *
+     * @param Document|SaleNote $document
+     * @return array{total: float, base: float}
+     */
+    public static function discountsWithIgvBreakdown($document)
+    {
+        $total = 0;
+        $base = 0;
+
+        // En factura/boleta el descuento global se reparte entre los ítems (from_global_distribution);
+        // en nota de venta y documentos antiguos queda solo a nivel de documento.
+        $global_distributed = false;
+
+        foreach ($document->items as $item) {
+            if (!$item->discounts) {
+                continue;
+            }
+
+            $factor = self::igvFactorByItem($item);
+
+            foreach ($item->discounts as $dis) {
+                if (!empty($dis->from_global_distribution)) {
+                    $global_distributed = true;
+                }
+
+                if ($dis->discount_type_id == '00') {
+                    $amount = ($dis->amount_without_rounded ?? $dis->amount) * $factor;
+                    $base += $amount;
+                } else {
+                    $amount = $dis->amount;
+                }
+
+                $total += $amount;
+            }
+        }
+
+        // Descuento global sin repartir: se suma al de los ítems (pueden coexistir).
+        // Con anticipo, total_discount/discounts guardan el anticipo: se muestra aparte.
+        if (!$global_distributed && !($document->total_prepayment > 0)) {
+            $globals = collect($document->discounts ?: [])->filter(function ($dis) {
+                return in_array(data_get($dis, 'discount_type_id'), ['02', '03']);
+            });
+
+            // 02 se aplica sobre la gravada y se guarda sin IGV
+            $igv_factor = ($document->total_taxed ?? 0) > 0 && ($document->total_igv ?? 0) > 0
+                ? 1 + round($document->total_igv / $document->total_taxed, 2)
+                : 1.18;
+
+            foreach ($globals as $dis) {
+                if (data_get($dis, 'discount_type_id') == '02') {
+                    // Monto ingresado con IGV (nota de venta): tal cual, evita diferencias por redondeo.
+                    $amount = data_get($dis, 'is_amount') && data_get($dis, 'input_amount') !== null
+                        ? (float) data_get($dis, 'input_amount')
+                        : (float) data_get($dis, 'amount') * $igv_factor;
+                    $base += $amount;
+                } else {
+                    $amount = (float) data_get($dis, 'amount');
+                }
+
+                $total += $amount;
+            }
+
+            // Documentos muy antiguos: total_discount sin detalle en discounts.
+            if ($total == 0 && $globals->isEmpty() && $document->total_value > 0 && $document->total_discount > 0) {
+                $total = $document->total_discount;
+            }
+        }
+
+        return [
+            'total' => round($total, 2),
+            'base' => round($base, 2),
+        ];
+    }
+
+    public function getTotalDiscountWithIgvAttribute()
+    {
+        return self::discountsWithIgvBreakdown($this)['total'];
+    }
+
+    /**
+     * Parte del descuento con IGV que redujo la base imponible (ya descontada del subtotal).
+     *
+     * @return float
+     */
+    public function getTotalDiscountBaseWithIgvAttribute()
+    {
+        return self::discountsWithIgvBreakdown($this)['base'];
+    }
+
+    /**
+     * Datos esenciales de una factura/boleta para consumo por API.
+     *
+     * Los descuentos siguen el mismo criterio que getTotalDiscountWithIgvAttribute():
+     * los que traen from_global_distribution provienen de repartir el descuento global
+     * entre los ítems, así que se acumulan aparte y no se mezclan con el descuento
+     * propio de cada línea.
+     *
+     * @return array
+     */
+    public function getApiResourceFind()
+    {
+        $global_discount = 0;
+        $person = $this->customer_id ? Person::find($this->customer_id) : null;
+        $person_ubigeo = $this->resolvePersonUbigeo($person);
+
+        $items = $this->items->map(function ($row) use (&$global_discount) {
+            $item_discount = 0;
+
+            foreach (($row->discounts ?: []) as $discount) {
+                // discount_type_id "00" guarda el importe sin IGV.
+                $amount = $discount->discount_type_id == '00'
+                    ? ($discount->amount_without_rounded ?? $discount->amount) * 1.18
+                    : $discount->amount;
+
+                if (!empty($discount->from_global_distribution)) {
+                    $global_discount += $amount;
+                } else {
+                    $item_discount += $amount;
+                }
+            }
+
+            return [
+                'quantity'       => (float) $row->quantity,
+                'unit_type_id'   => optional($row->item)->unit_type_id,
+                'internal_id'    => optional($row->item)->internal_id,
+                'description'    => $row->name_product_pdf ?: optional($row->item)->description,
+                'unit_price'     => round((float) $row->unit_price, 2),
+                // Solo el descuento propio de la linea, sin la parte repartida del global.
+                'total_discount' => round($item_discount, 2),
+                'total'          => round((float) $row->total, 2),
+            ];
+        })->values()->all();
+
+        return [
+            'series'                 => $this->series,
+            'number'                 => $this->number,
+            'document_type_id'       => $this->document_type_id,
+            'date_of_issue'          => optional($this->date_of_issue)->format('Y-m-d'),
+            'time_of_issue'          => $this->time_of_issue,
+            'date_of_due'            => optional(optional($this->invoice)->date_of_due)->format('Y-m-d'),
+            'currency_type_id'       => $this->currency_type_id,
+
+            'customer_name'          => optional($this->customer)->name,
+            'customer_number'        => optional($this->customer)->number,
+            'customer_address'       => $this->getApiResourceCustomerAddress(),
+            'department_id'          => $person_ubigeo['department_id'],
+            'province_id'            => $person_ubigeo['province_id'],
+            'district_id'            => $person_ubigeo['district_id'],
+
+            'qr'                     => $this->qr,
+
+            // Operaciones segun su afectacion al IGV.
+            'total_taxed'            => round((float) $this->total_taxed, 2),
+            'total_exonerated'       => round((float) $this->total_exonerated, 2),
+            'total_unaffected'       => round((float) $this->total_unaffected, 2),
+            'total_exportation'      => round((float) $this->total_exportation, 2),
+            'total_free'             => round((float) $this->total_free, 2),
+
+            'total_igv'              => round((float) $this->total_igv, 2),
+            'subtotal'               => round((float) $this->subtotal, 2),
+            // Descuento global (con IGV), reconstruido desde los items.
+            'total_discount_global'  => round($global_discount, 2),
+            'total'                  => round((float) $this->total, 2),
+
+            'items'                  => $items,
+            'terms_condition'        => $this->terms_condition,
+            'legends'                => $this->legends,
+            'seller'                 => $this->seller,
+
+            // Pie de la representacion impresa (plantilla modern-2027): cajero,
+            // hash, condicion de pago y pagos aplicados.
+            'hash'                            => $this->hash,
+            'user_name'                       => optional($this->user)->name,
+            'payment_condition_id'            => $this->payment_condition_id,
+            'payment_condition_name'          => optional($this->payment_condition)->name,
+            'payment_method_type_id'          => $this->payment_method_type_id,
+            'payment_method_type_description' => optional($this->payment_method_type)->description,
+            'payments'                        => $this->buildApiResourcePayments($this->payments),
+        ];
+    }
+
+    /**
+     * Ubigeo del cliente, con respaldo en su direccion principal.
+     *
+     * Las columnas department_id / province_id / district_id de persons pueden quedar
+     * vacias cuando el ubigeo solo llego a person_addresses (la fila main). Person::find()
+     * no mira esa tabla, asi que aqui se consulta antes de devolver null.
+     *
+     * @param  \App\Models\Tenant\Person|null  $person
+     * @return array
+     */
+    private function resolvePersonUbigeo($person)
+    {
+        $empty = ['department_id' => null, 'province_id' => null, 'district_id' => null];
+
+        if (!$person) {
+            return $empty;
+        }
+
+        if ($person->department_id && $person->province_id && $person->district_id) {
+            return [
+                'department_id' => $person->department_id,
+                'province_id'   => $person->province_id,
+                'district_id'   => $person->district_id,
+            ];
+        }
+
+        $address = $person->addresses()
+            ->orderByDesc('main')
+            ->orderBy('id')
+            ->first();
+
+        if (!$address || !$address->department_id || !$address->province_id || !$address->district_id) {
+            return $empty;
+        }
+
+        return [
+            'department_id' => $address->department_id,
+            'province_id'   => $address->province_id,
+            'district_id'   => $address->district_id,
+        ];
+    }
+
+    /**
+     * Arma la direccion del cliente igual que las plantillas PDF: la direccion
+     * registrada mas distrito, provincia y departamento, sin partes vacias.
+     *
+     * @return string|null
+     */
+    private function getApiResourceCustomerAddress()
+    {
+        $customer = $this->customer;
+
+        if (!$customer) {
+            return null;
+        }
+
+        $ubigeo = (isset($customer->district_id) && $customer->district_id !== '-')
+            ? District::find($customer->district_id)
+            : null;
+
+        $parts = [
+            $customer->address ?? null,
+            optional($customer->district)->description ?: optional($ubigeo)->description,
+            optional($customer->province)->description ?: optional(optional($ubigeo)->province)->description,
+            optional($customer->department)->description
+                ?: optional(optional(optional($ubigeo)->province)->department)->description,
+        ];
+
+        $parts = array_filter($parts, fn ($part) => !empty(trim((string) $part)));
+
+        return $parts ? implode(', ', $parts) : null;
+    }
+
+    public function getAdditionalDataAttribute($value)
+    {
+        return (is_null($value))?null:(object) json_decode($value);
+    }
+
+    public function setAdditionalDataAttribute($value)
+    {
+        $this->attributes['additional_data'] = (is_null($value))?null:json_encode($value);
+    }
+
+    /**
+     * Devuelve el ultimo numero por serie, si no existe devielve 0
+     *
+     * @param string $serie
+     *
+     * @return int
+     */
+    public static function getLastNumberBySerie($serie)
+    {
+        $t = Document::where('series', $serie)->select('number')->orderby('number', 'DESC')->first();
+        if (!empty($t)) {
+            return $t->number;
+        }
+        return 0;
+    }
+
+    public function getEstablishmentAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setEstablishmentAttribute($value)
+    {
+        $this->attributes['establishment'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getCustomerAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setCustomerAttribute($value)
+    {
+        $this->attributes['customer'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getChargesAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setChargesAttribute($value)
+    {
+        $this->attributes['charges'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getDiscountsAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setDiscountsAttribute($value)
+    {
+        $this->attributes['discounts'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getPrepaymentsAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setPrepaymentsAttribute($value)
+    {
+        $this->attributes['prepayments'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getGuidesAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setGuidesAttribute($value)
+    {
+        $this->attributes['guides'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getRelatedAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setRelatedAttribute($value)
+    {
+        $this->attributes['related'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getPerceptionAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setPerceptionAttribute($value)
+    {
+        $this->attributes['perception'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getDetractionAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setDetractionAttribute($value)
+    {
+        $this->attributes['detraction'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getLegendsAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setLegendsAttribute($value)
+    {
+        $this->attributes['legends'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getDataJsonAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setDataJsonAttribute($value)
+    {
+        $this->attributes['data_json'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getSoapShippingResponseAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setSoapShippingResponseAttribute($value)
+    {
+        $this->attributes['soap_shipping_response'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getResponseRegularizeShippingAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setResponseRegularizeShippingAttribute($value)
+    {
+        $this->attributes['response_regularize_shipping'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getRetentionAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setRetentionAttribute($value)
+    {
+        $this->attributes['retention'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getPointSystemDataAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setPointSystemDataAttribute($value)
+    {
+        $this->attributes['point_system_data'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function setItinerantAttribute($value)
+    {
+        $this->attributes['itinerant'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getItinerantAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+    public function getAdditionalInformationAttribute($value)
+    {
+        $arr = explode('|', $value);
+        return $arr;
+    }
+
+    public function getHotelDataPersonsAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setHotelDataPersonsAttribute($value)
+    {
+        $this->attributes['hotel_data_persons'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function agent()
+    {
+        return $this->belongsTo(Agent::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function relation_establishment()
+    {
+        return $this->belongsTo(Establishment::class, 'establishment_id');
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function seller()
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function soap_type()
+    {
+        return $this->belongsTo(SoapType::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function state_type()
+    {
+        return $this->belongsTo(StateType::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function person()
+    {
+        return $this->belongsTo(Person::class, 'customer_id');
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function group()
+    {
+        return $this->belongsTo(Group::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function document_type()
+    {
+        return $this->belongsTo(DocumentType::class, 'document_type_id');
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function currency_type()
+    {
+        return $this->belongsTo(CurrencyType::class, 'currency_type_id');
+    }
+
+    /**
+     * @return Company|Model|mixed|object|null
+     */
+    public function getCompanyAttribute()
+    {
+        return Company::first();
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function invoice()
+    {
+        return $this->hasOne(Invoice::class);
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function note()
+    {
+        return $this->hasOne(Note::class);
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function items()
+    {
+        return $this->hasMany(DocumentItem::class);
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function kardex()
+    {
+        return $this->hasMany(Kardex::class);
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function payments()
+    {
+        return $this->hasMany(DocumentPayment::class);
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function fee()
+    {
+        return $this->hasMany(DocumentFee::class);
+    }
+
+    /**
+     * Se usa en la relacion con el inventario kardex en modules/Inventory/Traits/InventoryTrait.php.
+     * Tambien se debe tener en cuenta modules/Inventory/Providers/InventoryKardexServiceProvider.php y
+     * app/Providers/KardexServiceProvider.php para la correcta gestion de kardex
+     *
+     * @return MorphMany
+     */
+    public function inventory_kardex()
+    {
+        return $this->morphMany(InventoryKardex::class, 'inventory_kardexable');
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function quotation()
+    {
+        return $this->belongsTo(Quotation::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function sale_note()
+    {
+        return $this->belongsTo(SaleNote::class, 'sale_note_id');
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function dispatch()
+    {
+        return $this->belongsTo(Dispatch::class, 'dispatch_id');
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function hotel()
+    {
+        return $this->hasOne(DocumentHotel::class);
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function transport()
+    {
+        return $this->hasOne(DocumentTransport::class);
+    }
+
+    public function cash_document()
+    {
+        return $this->hasOne(CashDocument::class, 'document_id');
+    }
+
+    /**
+     * @return string
+     */
+    public function getNumberFullAttribute()
+    {
+        return $this->series . '-' . $this->number;
+    }
+
+    public function getNumberToLetterAttribute()
+    {
+        $legends = $this->legends;
+        $legend = collect($legends)->where('code', '1000')->first();
+        return $legend->value;
+    }
+
+    /**
+     * @return string
+     */
+    public function getDownloadExternalXmlAttribute()
+    {
+        return route('tenant.download.external_id', ['model' => 'document', 'type' => 'xml', 'external_id' => $this->external_id]);
+    }
+
+    /**
+     * @return string
+     */
+    public function getDownloadExternalPdfAttribute()
+    {
+        return route('tenant.download.external_id', ['model' => 'document', 'type' => 'pdf', 'external_id' => $this->external_id]);
+    }
+
+    /**
+     * @return string
+     */
+    public function getDownloadExternalCdrAttribute()
+    {
+        return route('tenant.download.external_id', ['model' => 'document', 'type' => 'cdr', 'external_id' => $this->external_id]);
+    }
+
+    /**
+     * @param $query
+     *
+     * @return null
+     */
+    public function scopeWhereTypeUser($query, $params = [])
+    {
+        /** @var User $user */
+        //$user_id = null;
+
+        if (isset($params['user_id'])) {
+            $user_id = (int)$params['user_id'];
+            $user = User::find($user_id);
+            if (!$user) {
+                $user = new User();
+            }
+        } else {
+            $user = auth()->user();
+        }
+
+        return ($user->type === 'admin') ? null : $query->where('user_id', $user->id)->orWhere('seller_id', $user->id)->latest();
+        // return ($user->type == 'seller') ? $query->where('user_id', $user->id) : null;
+    }
+
+    /**
+     * @param $query
+     *
+     * @return mixed
+     */
+    public function scopeWhereNotSent($query)
+    {
+        return $query->whereIn('state_type_id', ['01', '03'])->where('date_of_issue', '<=', date('Y-m-d'));
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function affected_documents()
+    {
+        return $this->hasMany(Note::class, 'affected_document_id');
+    }
+
+    /**
+     * @param $query
+     *
+     * @return mixed
+     */
+    public function scopeWhereHasPrepayment($query)
+    {
+        return $query->where([['has_prepayment', true], ['was_deducted_prepayment', false], ['state_type_id', '05']])
+            ->whereDoesntHave('affected_documents', function ($q) {
+                $q->where('note_type', 'credit');
+            });
+    }
+
+    /**
+     * @return HasMany
+     */
+    public function reference_guides()
+    {
+        return $this->hasMany(Dispatch::class, 'reference_document_id', 'id');
+    }
+
+    /**
+     * @return HasOne
+     */
+    public function summary_document()
+    {
+        return $this->hasOne(SummaryDocument::class);
+    }
+
+    /**
+     * @param $query
+     * @param $type
+     *
+     * @return mixed
+     */
+    public function scopeWhereAffectationTypePrepayment($query, $type)
+    {
+        return $query->where('affectation_type_prepayment', $type);
+    }
+
+    /**
+     * @param $query
+     *
+     * @return mixed
+     */
+    public function scopeWhereStateTypeAccepted($query)
+    {
+        return $query->whereIn('state_type_id', ['01', '03', '05', '07', '13']);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function payment_method_type()
+    {
+        return $this->belongsTo(PaymentMethodType::class);
+    }
+
+    /**
+     * @param $query
+     *
+     * @return mixed
+     */
+    public function scopeWhereRegularizeShipping($query)
+    {
+        return $query->where('state_type_id', '01')->where('regularize_shipping', true);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function order_note()
+    {
+        return $this->belongsTo(OrderNote::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function technical_service()
+    {
+        return $this->belongsTo(TechnicalService::class);
+    }
+
+    /**
+     * @return BelongsTo
+     */
+    public function payment_condition()
+    {
+        return $this->belongsTo(PaymentCondition::class);
+    }
+
+    /**
+     * @param $value
+     *
+     * @return bool
+     */
+    public function getIsEditableAttribute($value)
+    {
+        return $value ? true : false;
+    }
+
+    /**
+     * Evalua si es posible borrarlo basado en las condiciones:
+     * regularize_shipping y response_regularize_shipping no este vacio
+     * El documento este replicado  en series y numero
+     *
+     * @return bool
+     */
+    public function canDelete()
+    {
+        if (!empty($this->regularize_shipping) &&
+            !empty($this->response_regularize_shipping)) {
+            $duplicated = self::where([
+                'series' => $this->series,
+                'number' => $this->number,
+            ])->where('id', '!=', $this->id)->first();
+            if (!empty($duplicated)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Actualiza los pdf que se encuentran en las carpetas
+     *
+     * @return $this
+     * @throws Exception
+     */
+    public function updatePdfs()
+    {
+        // se genera un solo formato para ser guardado en storage, en este caso esta quedando el ultimo formato, en una actualizacion se podria deifinir por configuracion cual formato es el que esta asignado por defecto
+        $formats = [
+            'ticket',
+            'a5',
+            'a4',
+        ];
+        $DownloadController = new DownloadController();
+        foreach ($formats as $format) {
+            try {
+                $DownloadController
+                    ->toPrint('Document', $this->external_id, $format);
+            } catch (ErrorException $e) {
+                // do nothing
+            }
+        }
+        return $this;
+
+    }
+
+    /**
+     * Devuelve notas de credito o debito que afectan al documento
+     *
+     * @return Note[]|\Illuminate\Database\Eloquent\Builder[]|EloquentCollection|Builder[]|Collection|mixed
+     */
+    public function getNotes()
+    {
+        return Note::where('affected_document_id', $this->id)->get();
+    }
+
+    /**
+     * @return float
+     */
+    public function getTotal(): float
+    {
+        return $this->total;
+    }
+
+    /**
+     * @param float $total
+     *
+     * @return Document
+     */
+    public function setTotal(float $total): Document
+    {
+        $this->total = $total;
+        return $this;
+    }
+
+    /**
+     * Retorna una coleccion de nota de ventas con el formato especificado
+     *
+     * @return SaleNote[]|\Illuminate\Database\Eloquent\Builder[]|EloquentCollection|Builder[]|Collection|mixed
+     */
+    public function getNvCollection()
+    {
+
+        return SaleNote::where('document_id', $this->id)
+            ->orWhere('id', $this->sale_note_id)
+            ->get()
+            ->transform(function ($sale_note) {
+                /** @var SaleNote $sale_note */
+                return $sale_note->getCollectionData();
+            });
+    }
+
+    /**
+     * @return array
+     */
+    public function getOrderNoteCollection()
+    {
+        $orderNote = OrderNote::find($this->order_note_id);
+        if ($orderNote === null) return [];
+        return $orderNote->getCollectionData();
+    }
+
+    /**
+     * Devuelve una coleccion de plataformas web basado en los items.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder[]|EloquentCollection|Builder[]|Collection|mixed|WebPlatform|WebPlatform[]
+     */
+    public function getPlatformThroughItems()
+    {
+        /**
+         * @var EloquentCollection $items
+         * @var WebPlatform $web_platforms
+         */
+        $items = $this->items->pluck('item_id');
+        $web_platform_table_name = (new WebPlatform())->getTable();
+        $item_table_name = (new Item())->getTable();
+        return WebPlatform::leftJoin('items', "$web_platform_table_name.id", '=', "$item_table_name.web_platform_id")
+            ->select("$web_platform_table_name.id", "$web_platform_table_name.name")
+            ->wherein("$item_table_name.id", $items)
+            ->get();
+    }
+
+    /**
+     * @param $query
+     *
+     * @return mixed
+     */
+    public function scopeWhereValuedKardexFormatSunat($query, $params)
+    {
+        return $query->whereStateTypeAccepted()
+            ->whereTypeUser()
+            ->whereBetween('date_of_issue', [$params->date_start, $params->date_end])
+            ->whereNull('sale_note_id')
+            ->whereNull('order_note_id')
+            ->whereNull('dispatch_id')
+            ->where(function ($q) {
+                $q->whereNull('sale_notes_relateds')
+                    ->orWhere('sale_notes_relateds', '[]');
+            });
+    }
+
+
+    /**
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany
+     */
+    public function guide_files()
+    {
+        return $this->hasMany(GuideFile::class);
+    }
+
+    public function tip()
+    {
+        return $this->morphOne(Tip::class, 'origin');
+    }
+
+    /**
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param int $establishment_id
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeWhereEstablishmentId(EloquentBuilder $query, $establishment_id = 0)
+    {
+
+        if ($establishment_id != 0) {
+            $query->where('establishment_id', $establishment_id);
+        }
+        return $query;
+    }
+
+    /**
+     * Devuelve el vendedor asociado, Si seller id es nulo, devolverá el usuario del campo user.
+     *
+     * @return User
+     */
+    public function getSellerData()
+    {
+        if (!empty($this->seller_id)) {
+            return $this->seller;
+        }
+        return $this->user;
+
+    }
+
+
+    /**
+     *
+     * Filtros para reportes de comisiones
+     * Usado en:
+     * Modules\Report\Http\Controllers\ReportCommissionController
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @param $date_start
+     * @param $date_end
+     * @param $establishment_id
+     * @param $user_type
+     * @param $user_seller_id
+     * @param $row_user_id
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeWhereFilterCommission($query, $date_start, $date_end, $establishment_id, $user_type, $user_seller_id, $row_user_id)
+    {
+
+        $query->whereStateTypeAccepted()
+            ->whereBetween('date_of_issue', [$date_start, $date_end])
+            ->whereEstablishmentId($establishment_id);
+
+        if ($user_seller_id) {
+            $query->where($user_type, $user_seller_id);
+        } else {
+            $query->where($user_type, $row_user_id);
+        }
+
+        return $query;
+    }
+
+
+    /**
+     * Obtener total del documento verificando el tipo de documento
+     * NC descuenta
+     * Usado en:
+     * Modules\Report\Helpers\UserCommissionHelper para reporte de comisiones
+     *
+     * @return float
+     */
+    public function getTotalByDocumentType()
+    {
+        return $this->document_type_id === '07' ? $this->total * -1 : $this->total;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getGrade(): ?string
+    {
+        return $this->grade;
+    }
+
+    /**
+     * @param string|null $grade
+     *
+     * @return Document
+     */
+    public function setGrade(?string $grade): Document
+    {
+        $this->grade = $grade;
+        return $this;
+    }
+
+    /**
+     * @return string|null
+     */
+    public function getSection(): ?string
+    {
+        return $this->section;
+    }
+
+    /**
+     * @param string|null $section
+     *
+     * @return Document
+     */
+    public function setSection(?string $section): Document
+    {
+        $this->section = $section;
+        return $this;
+    }
+
+    /**
+     * Devuelve el modelo del tipo de documetno actual
+     *
+     * @return DocumentType
+     */
+    public function getDocumentType()
+    {
+        return $this->document_type;
+    }
+
+    /**
+     * @return bool
+     */
+    public function isHasCdr()
+    {
+        return (bool)$this->has_cdr;
+    }
+
+    /**
+     * Retornar placas registradas
+     *
+     * @return array
+     */
+    public function getPlateNumbers()
+    {
+        $plate_numbers = collect();
+
+        if (in_array($this->document_type_id, ['01', '03'])) {
+
+            if ($this->plate_number) return $plate_numbers->push(['description' => $this->plate_number]);
+
+            //obtener las placas registradas por cada item
+            $this->items->each(function ($item) use ($plate_numbers) {
+
+                $item->getPlateNumberByItems()->each(function ($row) use ($plate_numbers) {
+                    $plate_numbers->push(['description' => $row->value]);
+                });
+
+            });
+
+        }
+
+        return $plate_numbers;
+
+    }
+
+
+    /**
+     * Obtener tipo de documento válido para enviar el xml a firmar al pse
+     *
+     * Usado en:
+     * App\CoreFacturalo\Services\Helpers\SendDocumentPse
+     *
+     * @return string
+     */
+    public function getDocumentTypeForPse()
+    {
+
+        $allowed_document_types = [
+            '01' => 'FACT',
+            '03' => 'BOLE',
+            '07' => 'NOCR',
+            '08' => 'NODB',
+        ];
+
+
+        return $allowed_document_types[$this->document_type_id];
+
+    }
+
+    public function getResponseSendCdrPseAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setResponseSendCdrPseAttribute($value)
+    {
+        $this->attributes['response_send_cdr_pse'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    public function getResponseSignaturePseAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    public function setResponseSignaturePseAttribute($value)
+    {
+        $this->attributes['response_signature_pse'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    /**
+     * registros asociados cuando se genera cpe desde multiples notas de venta
+     *
+     * @param $value
+     */
+    public function getSaleNotesRelatedsAttribute($value)
+    {
+        return (is_null($value)) ? null : (object)json_decode($value);
+    }
+
+    /**
+     * registros asociados cuando se genera cpe desde multiples notas de venta
+     *
+     * @param $value
+     */
+    public function setSaleNotesRelatedsAttribute($value)
+    {
+        $this->attributes['sale_notes_relateds'] = (is_null($value)) ? null : json_encode($value);
+    }
+
+    /**
+     *
+     * Filtro para no incluir relaciones en consulta
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public function scopeWhereFilterWithOutRelations($query)
+    {
+        return $query->withOut([
+            'user',
+            'soap_type',
+            'state_type',
+            'document_type',
+            'currency_type',
+            'group',
+            'items',
+            'invoice',
+            'note',
+            'payments',
+            'fee'
+        ]);
+    }
+
+
+    /**
+     * Obtener diferencia de días en base a la fecha de emisión
+     *
+     * Usado en:
+     * VoidedController - Validación de plazo de envío
+     *
+     * @param Carbon $value
+     * @return int
+     */
+    public function getDiffInDaysDateOfIssue($value = null)
+    {
+        $date = $value ?? Carbon::now();
+
+        return $this->date_of_issue->diffInDays($date);
+    }
+
+
+    /**
+     * Validar si el documento fue generado a partir de un registro externo
+     *
+     * Usado en:
+     * InventoryKardexServiceProvider
+     *
+     * @return bool
+     */
+    public function isGeneratedFromExternalRecord()
+    {
+        $generated = false;
+
+        if (!is_null($this->order_note_id)) {
+            $generated = true;
+        }
+
+        // @todo agregar mas registros relacionados
+
+        return $generated;
+    }
+
+
+    /**
+     *
+     * Filtrar por rango de fechas
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     *
+     */
+    public function scopeFilterRangeDateOfIssue($query, $date_start, $date_end)
+    {
+        return $query->whereBetween('date_of_issue', [$date_start, $date_end]);
+    }
+
+    /**
+     *
+     * Filtrar facturas y boletas
+     *
+     * @param \Illuminate\Database\Eloquent\Builder $query
+     * @return \Illuminate\Database\Eloquent\Builder
+     *
+     */
+    public function scopeFilterDocumentTypeInvoice($query)
+    {
+        return $query->whereIn('document_type_id', ['01', '03']);
+    }
+
+    /**
+     *
+     * @return string
+     *
+     */
+    public function getVoidedDescription()
+    {
+        return $this->state_type_id === '11' ? 'SI' : 'NO';
+    }
+
+
+    /**
+     *
+     * Obtener pagos en efectivo
+     *
+     * @return Collection
+     */
+    public function getCashPayments()
+    {
+        return $this->payments()->whereFilterCashPayment()->get()->transform(function ($row) {
+            {
+                return $row->getRowResourceCashPayment();
+            }
+        });
+    }
+
+
+    /**
+     *
+     * Validar si el registro esta rechazado o anulado
+     *
+     * @return bool
+     */
+    public function isVoidedOrRejected()
+    {
+        return in_array($this->state_type_id, self::VOIDED_REJECTED_IDS);
+    }
+
+
+    /**
+     *
+     * Obtener el total de notas de credito de cada cpe
+     *
+     * @return float
+     */
+    public function getCreditNotesTotal()
+    {
+        return $this->affected_documents()
+            ->join('documents', 'documents.id', '=', 'notes.document_id')
+            ->whereHas('document', function ($query) {
+                return $query->whereStateTypeAccepted()->where('document_type_id', '07');
+            })
+            ->sum('documents.total');
+    }
+
+
+    /**
+     *
+     * Obtener query de nc para subconsulta de cuentas por cobrar
+     *
+     * Usado en:
+     * DashboardView
+     * AccountsReceivable
+     *
+     * @return \Illuminate\Database\Eloquent\Builder
+     */
+    public static function getQueryCreditNotes()
+    {
+        return DB::connection('tenant')->table('notes')
+            ->join('documents', 'documents.id', '=', 'notes.document_id')
+            ->whereIn('documents.state_type_id', ['01', '03', '05', '07', '13'])
+            ->where('documents.document_type_id', '07')
+            ->select('affected_document_id', DB::raw('SUM(documents.total) as total_credit_notes'))
+            ->groupBy('affected_document_id');
+    }
+
+
+    /**
+     *
+     * Retornar el total de pagos
+     *
+     * @return float
+     */
+    public function getTotalAllPayments()
+    {
+
+        $total_payments = 0;
+
+        if (!$this->isVoidedOrRejected()) {
+            $total_payments = $this->payments->sum('payment');
+
+            if ($this->currency_type_id === 'USD') {
+                $total_payments = $this->generalConvertValueToPen($total_payments, $this->exchange_rate_sale);
+            }
+        }
+
+        return $total_payments;
+    }
+
+
+    /**
+     *
+     * Filtrar documentos para generar resumen diario
+     *
+     * @param Builder $query
+     * @param string $date_of_reference
+     * @param string $soap_type_id
+     * @return Builder
+     *
+     */
+    public function scopeFilterDocumentsForSummary($query, $date_of_reference, $soap_type_id)
+    {
+        return $query->whereFilterWithOutRelations()
+            ->with([
+                'document_type' => function ($q) {
+                    $q->select('id', 'description');
+                },
+            ])
+            ->select([
+                'id',
+                'series',
+                'number',
+                'document_type_id',
+                'currency_type_id',
+                'total_exportation',
+                'total_free',
+                'total_unaffected',
+                'total_exonerated',
+                'total_charge',
+                'total_taxed',
+                'total_igv',
+                'total',
+                // columnas usadas solo por los filtros del where
+                'date_of_issue',
+                'soap_type_id',
+                'group_id',
+                'state_type_id',
+                'ticket_single_shipment',
+            ])
+            ->where('date_of_issue', $date_of_reference)
+            ->where('soap_type_id', $soap_type_id)
+            ->where('group_id', '02')
+            ->where('state_type_id', '01')
+            ->where('ticket_single_shipment', false)
+            ->take(500);
+    }
+
+
+    /**
+     *
+     * Validar si la boleta y notas se enviaron de forma individual
+     *
+     * @return bool
+     */
+    public function isSingleDocumentShipment()
+    {
+        return in_array($this->document_type_id, ['03', '07', '08'], true) && $this->ticket_single_shipment;
+        // return $this->document_type_id === self::DOCUMENT_TYPE_TICKET && $this->ticket_single_shipment;
+    }
+
+
+    /**
+     *
+     * Validar si la boleta se envio de forma individual
+     *
+     * @return bool
+     */
+    public function isSingleTicketDocumentShipment()
+    {
+        return $this->isDocumentTypeTicket() && $this->ticket_single_shipment;
+    }
+
+    /**
+     *
+     * Validar si se modifico la boleta enviada de forma individual, a resumen
+     *
+     * @return bool
+     */
+    public function isForceSendBySummary()
+    {
+        return $this->isDocumentTypeTicket() && $this->force_send_by_summary;
+    }
+
+
+    /**
+     *
+     * Validar si se puede modificar el tipo de envio de la boleta, individual a resumen
+     *
+     * @return bool
+     */
+    public function isAvailableForceSendBySummary()
+    {
+        return $this->isSingleDocumentShipment() && !$this->force_send_by_summary && $this->state_type_id === self::STATE_TYPE_REGISTERED && auth()->user()->permission_force_send_by_summary;
+    }
+
+
+    /**
+     *
+     * Verificar si es boleta
+     *
+     * @return bool
+     */
+    public function isDocumentTypeTicket()
+    {
+        return $this->document_type_id === self::DOCUMENT_TYPE_TICKET;
+    }
+
+
+    /**
+     *
+     * Determina si se muestra el boton consultar cdr
+     *
+     * @return bool
+     */
+    public function isAvailableConsultCdr()
+    {
+        $action = false;
+
+        if ($this->state_type_id === self::STATE_TYPE_REGISTERED && $this->soap_type_id === self::SOAP_TYPE_PRODUCTION)
+        {
+            if($this->group_id === self::GROUP_INVOICE)
+            {
+                $action = true;
+            }
+            else
+            {
+                if($this->isSingleDocumentShipment()) $action = true;
+            }
+        }
+
+        return $action;
+    }
+
+
+    /**
+     *
+     * Determina si se muestra el boton para reenvio
+     *
+     * @return bool
+     */
+    public function isAvailableResend()
+    {
+        $action = false;
+
+        if ($this->state_type_id === self::STATE_TYPE_REGISTERED)
+        {
+            if($this->group_id === self::GROUP_INVOICE)
+            {
+                $action = true;
+            }
+            else
+            {
+                if($this->isSingleDocumentShipment()) $action = true;
+            }
+        }
+
+        return $action;
+    }
+
+
+    /**
+     *
+     * Filtrar registros para listado de documentos - app
+     *
+     * @param Builder $query
+     * @param Request $request
+     * @return Builder
+     */
+    public static function scopeFilterRecordsAppApi($query, $request)
+    {
+
+        $state_type_id = $request->state_type_id ?? 'all';
+
+        $query->whereTypeUser()
+            ->where(function ($q) use ($request) {
+                $q->where('series', 'like', "%{$request->input}%")
+                    ->orWhere('number', 'like', "%{$request->input}%");
+            })
+            ->where('document_type_id', $request->document_type_id);
+
+
+        if ($state_type_id !== 'all') {
+            $query->where('state_type_id', $request->state_type_id);
+        }
+
+        return $query;
+    }
+
+    /**
+     *
+     * Obtener relaciones necesarias o aplicar filtros para reporte pagos - finanzas
+     *
+     * @param Builder $query
+     * @return Builder
+     */
+    public function scopeFilterRelationsGlobalPayment($query)
+    {
+        return $query->whereFilterWithOutRelations()
+            ->with([
+                'document_type' => function ($q) {
+                    $q->select('id', 'description');
+                },
+            ])
+            ->select([
+                'id',
+                'user_id',
+                'external_id',
+                'establishment_id',
+                'soap_type_id',
+                'state_type_id',
+                'document_type_id',
+                'series',
+                'number',
+                'date_of_issue',
+                'time_of_issue',
+                'customer_id',
+                'customer',
+                'currency_type_id',
+                'quotation_id',
+                'exchange_rate_sale',
+                'total',
+                'filename',
+                'sale_note_id',
+                'total_canceled',
+                'order_note_id',
+                'payment_method_type_id',
+                'seller_id',
+                'payment_condition_id',
+                'dispatch_id',
+                'technical_service_id',
+            ]);
+    }
+
+
+    /**
+     *
+     * Determina si es factura o boleta
+     *
+     * @return bool
+     */
+    public function isDocumentTypeInvoice()
+    {
+        return in_array($this->document_type_id, ['01', '03'], true);
+    }
+
+
+    /**
+     *
+     * Determina si fue usado para sistema por puntos
+     *
+     * @return bool
+     */
+    public function isPointSystem()
+    {
+        return $this->point_system;
+    }
+
+
+    /**
+     *
+     * Obtener puntos por la venta
+     *
+     * @return float
+     *
+     */
+    public function getPointsBySale()
+    {
+        $calculate_quantity_points = 0;
+
+        if($this->isPointSystem())
+        {
+            $point_system_data = $this->point_system_data;
+            $total = $this->total;
+
+            $value_quantity_points = ($total / $point_system_data->point_system_sale_amount) * $point_system_data->quantity_of_points;
+            $calculate_quantity_points = $point_system_data->round_points_of_sale ? intval($value_quantity_points) : round($value_quantity_points, 2);
+        }
+
+        return $calculate_quantity_points;
+    }
+
+    public function getQrAttribute($value)
+    {
+        if(!is_null($value)) {
+            return $value;
+        }
+        $company = Company::query()->first();
+        $customer = $this->customer;
+        $text = join('|', [
+            $company->number,
+            $this->document_type_id,
+            $this->series,
+            $this->number,
+            $this->total_igv,
+            $this->total,
+            $this->date_of_issue->format('Y-m-d'),
+            $customer->identity_document_type_id,
+            $customer->number,
+            $this->hash.'|'
+        ]);
+
+        $qrCode = new QrCodeGenerate();
+        return $qrCode->displayPNGBase64($text);
+    }
+
+
+    /**
+     *
+     * @param  string $format
+     * @return string
+     */
+    public function getUrlPrintByFormat($format)
+    {
+        return url("print/document/{$this->external_id}/{$format}");
+    }
+
+
+    /**
+     *
+     * Filtrar registro para envio de mensajes por whatsapp
+     *
+     * @param Builder $query
+     * @return Builder
+     */
+    public static function scopeFilterDataForSendMessage($query)
+    {
+        return $query->whereFilterWithOutRelations()
+                    ->select([
+                        'id',
+                        'external_id',
+                        'series',
+                        'number',
+                        'filename'
+                    ]);
+    }
+
+
+    /**
+     *
+     * Placa para reporte de ventas
+     *
+     * @return string
+     */
+    public function getPlateNumberSaleReport()
+    {
+        return $this->plate_number;
+    }
+
+
+    /**
+     *
+     * @return bool
+     */
+    public function isCreditNote()
+    {
+        return $this->document_type_id === DocumentType::CREDIT_NOTE_ID;
+    }
+
+
+    /**
+     *
+     * Determina si es nota credito tipo 13
+     *
+     * @return bool
+     */
+    public function isCreditNoteAndType13()
+    {
+        if($this->isCreditNote())
+        {
+            if($this->note)
+            {
+                return $this->note->isTypePaymentDateAdjustments();
+            }
+        }
+
+        return false;
+    }
+
+
+    /**
+     * 
+     * Documento afectado por la nota
+     *
+     * @param  int $affected_document_id
+     * @return Document
+     * 
+     */
+    public static function getAffectedDocumentSingleShipment($affected_document_id)
+    {
+        return self::whereFilterWithOutRelations()
+                    ->select([
+                        'id',
+                        'document_type_id',
+                        'ticket_single_shipment'
+                    ])
+                    ->find($affected_document_id);
+    }
+
+
+    /**
+     *
+     * Tipo de transaccion para caja
+     *
+     * @return string
+     */
+    public function getTransactionTypeCash()
+    {
+        return 'income';
+    }
+
+
+    /**
+     *
+     * Tipo de documento para caja
+     *
+     * @return string
+     */
+    public function getDocumentTypeCash()
+    {
+        return $this->getTable();
+    }
+
+
+    /**
+     *
+     * Datos para resumen diario de operaciones
+     *
+     * @return array
+     */
+    public function applySummaryDailyOperations()
+    {
+        return [
+            'transaction_type' => $this->getTransactionTypeCash(),
+            'document_type' => $this->getDocumentTypeCash(),
+            'apply' => $this->hasAcceptedState(),
+        ];
+    }
+
+
+    /**
+     *
+     * Obtener total de pagos en efectivo sin considerar destino
+     *
+     * @return float
+     */
+    public function totalCashPaymentsWithoutDestination()
+    {
+        return $this->payments()->filterCashPaymentWithoutDestination()->sum('payment');
+    }
+
+
+    /**
+     *
+     * Obtener total de pagos en transferencia
+     *
+     * @return float
+     */
+    public function totalTransferPayments()
+    {
+        return $this->payments()->filterTransferPayment()->sum('payment');
+    }
+
+
+    /**
+     *
+     * Validar si tiene estado permitido para calculos/etc
+     *
+     * @return bool
+     */
+    public function hasAcceptedState()
+    {
+        return in_array($this->state_type_id, self::STATE_TYPES_ACCEPTED, true);
+    }
+
+
+    /**
+     *
+     * @return bool
+     */
+    public function hasNationalCurrency()
+    {
+        return $this->currency_type_id === self::NATIONAL_CURRENCY_ID;
+    }
+
+
+    /**
+     *
+     * Obtener base imponible de la retencion en soles
+     *
+     * @return float
+     */
+    public function getRetentionTaxBase()
+    {
+        $base = 0;
+
+        if($this->retention)
+        {
+            $base = $this->hasNationalCurrency() ? $this->retention->base : $this->generalConvertValueToPen($this->retention->base, $this->retention->exchange_rate);
+        }
+
+        return round($base, 2);
+    }
+
+
+    /**
+     *
+     * @param  float $value
+     * @return float
+     */
+    public function getValueGreaterZero($value)
+    {
+        if($value > 0) return $this->generalApplyNumberFormat($value);
+
+        return null;
+    }
+
+
+    public function has_cash()
+    {
+        return $this->payments->contains('is_cash', true);
+    }
+}

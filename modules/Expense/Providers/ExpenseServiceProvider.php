@@ -1,0 +1,114 @@
+<?php
+
+namespace Modules\Expense\Providers;
+
+use Illuminate\Support\ServiceProvider;
+use Modules\Dashboard\Widgets\WidgetSourceRegistry;
+use Modules\Expense\Widgets\ExpenseTotalsSource;
+// use Illuminate\Database\Eloquent\Factory;
+
+class ExpenseServiceProvider extends ServiceProvider
+{
+    /**
+     * Boot the application events.
+     *
+     * @return void
+     */
+    public function boot()
+    {
+        $this->registerTranslations();
+        $this->registerConfig();
+        $this->registerViews();
+        // $this->registerFactories();
+        $this->loadMigrationsFrom(__DIR__ . '/../Database/Migrations');
+
+        // Fuente de widget aportada al dashboard (patrón de extensión,
+        // ver modules/Dashboard/WIDGETS.md).
+        $this->app->afterResolving(WidgetSourceRegistry::class, function ($registry) {
+            $registry->register(new ExpenseTotalsSource());
+        });
+    }
+
+    /**
+     * Register the service provider.
+     *
+     * @return void
+     */
+    public function register()
+    {
+        $this->app->register(RouteServiceProvider::class);
+    }
+
+    /**
+     * Register config.
+     *
+     * @return void
+     */
+    protected function registerConfig()
+    {
+        $this->publishes([
+            __DIR__.'/../Config/config.php' => config_path('expense.php'),
+        ], 'config');
+        $this->mergeConfigFrom(
+            __DIR__.'/../Config/config.php', 'expense'
+        );
+    }
+
+    /**
+     * Register views.
+     *
+     * @return void
+     */
+    public function registerViews()
+    {
+        $viewPath = resource_path('views/modules/expense');
+
+        $sourcePath = __DIR__.'/../Resources/views';
+
+        $this->publishes([
+            $sourcePath => $viewPath
+        ],'views');
+
+        $this->loadViewsFrom(array_merge(array_map(function ($path) {
+            return $path . '/modules/expense';
+        }, \Config::get('view.paths')), [$sourcePath]), 'expense');
+    }
+
+    /**
+     * Register translations.
+     *
+     * @return void
+     */
+    public function registerTranslations()
+    {
+        $langPath = resource_path('lang/modules/expense');
+
+        if (is_dir($langPath)) {
+            $this->loadTranslationsFrom($langPath, 'expense');
+        } else {
+            $this->loadTranslationsFrom(__DIR__ .'/../Resources/lang', 'expense');
+        }
+    }
+
+    /**
+     * Register an additional directory of factories.
+     *
+     * @return void
+     */
+    public function registerFactories()
+    {
+        if (! app()->environment('production')) {
+            app(Factory::class)->load(__DIR__ . '/../Database/factories');
+        }
+    }
+
+    /**
+     * Get the services provided by the provider.
+     *
+     * @return array
+     */
+    public function provides()
+    {
+        return [];
+    }
+}
